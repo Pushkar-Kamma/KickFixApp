@@ -1,118 +1,55 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
+import React, { useEffect } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { Camera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
+import { Canvas, Circle } from '@shopify/react-native-skia';
+import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming } from 'react-native-reanimated';
 
-import React from 'react';
-import type {PropsWithChildren} from 'react';
-import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  useColorScheme,
-  View,
-} from 'react-native';
+export default function App() {
+  const { hasPermission, requestPermission } = useCameraPermission();
+  const device = useCameraDevice('back');
+  
+  // Reanimated Test Value
+  const opacity = useSharedValue(0.3);
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+  useEffect(() => {
+    if (!hasPermission) {
+      requestPermission();
+    }
+    // Simple pulsing animation to prove Reanimated is working
+    opacity.value = withRepeat(withTiming(1, { duration: 1000 }), -1, true);
+  }, [hasPermission, requestPermission, opacity]);
 
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+  }));
 
-function Section({children, title}: SectionProps): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+  if (!hasPermission) return <View style={styles.container}><Text style={styles.text}>Requesting Camera...</Text></View>;
+  if (device == null) return <View style={styles.container}><Text style={styles.text}>No Camera Found.</Text></View>;
+
   return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
+    <View style={styles.container}>
+      {/* 1. Vision Camera */}
+      <Camera 
+        style={StyleSheet.absoluteFill} 
+        device={device} 
+        isActive={true} 
+      />
+      
+      {/* 2. Skia Graphics Engine */}
+      <Canvas style={StyleSheet.absoluteFill}>
+        <Circle cx={150} cy={150} r={50} color="cyan" />
+      </Canvas>
+
+      {/* 3. Reanimated Overlay */}
+      <Animated.View style={[styles.overlay, animatedStyle]}>
+        <Text style={styles.text}>Camera + Skia + Reanimated Active</Text>
+      </Animated.View>
     </View>
   );
 }
 
-function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
-  };
-
-  return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
-
 const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-  },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
-  },
-  highlight: {
-    fontWeight: '700',
-  },
+  container: { flex: 1, backgroundColor: 'black', justifyContent: 'center', alignItems: 'center' },
+  overlay: { position: 'absolute', bottom: 50, backgroundColor: 'rgba(0,0,0,0.7)', padding: 15, borderRadius: 10 },
+  text: { color: '#00FFFF', fontSize: 16, fontWeight: 'bold' }
 });
-
-export default App;
