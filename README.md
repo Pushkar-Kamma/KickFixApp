@@ -1,79 +1,102 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# KickFix — AI Taekwondo Coach
 
-# Getting Started
+**KickFix** analyzes your kicks through the device camera, detects execution mistakes, and returns real-time feedback. Built with **MediaPipe Pose**, **React Native**, and on-device **TFLite** for low-latency, offline-capable coaching.
 
->**Note**: Make sure you have completed the [React Native - Environment Setup](https://reactnative.dev/docs/environment-setup) instructions till "Creating a new application" step, before proceeding.
+Future roadmap: combo prompts, ML-based analysis, and AI-generated feedback.
 
-## Step 1: Start the Metro Server
+---
 
-First, you will need to start **Metro**, the JavaScript _bundler_ that ships _with_ React Native.
+## What It Does (MVP)
 
-To start Metro, run the following command from the _root_ of your React Native project:
+- **Real-time pose estimation** via camera → 33 body landmarks (MediaPipe format).
+- **Skeleton overlay** drawn with Skia over the camera feed.
+- **FPS counter** and pose viewer (foundation for kick grading, state machine, and feedback UI).
+
+Planned: kick counting, speed/chamber timing, random combo prompts, then form feedback and gamification.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| App | React Native (CLI, no Expo) |
+| Camera | `react-native-vision-camera` @ 60 FPS capable |
+| Pose AI | `react-native-fast-tflite` + MediaPipe Pose Landmarker `.tflite` |
+| Overlay | `@shopify/react-native-skia` (GPU-drawn skeleton) |
+| Frame processing | `react-native-worklets-core` (sync with camera) |
+| Resize for model | `vision-camera-resize-plugin` (256×256 RGB float) |
+
+---
+
+## Getting Started
+
+### 1. Prerequisites
+
+- Node.js ≥ 18
+- React Native environment (Android Studio / Xcode, SDKs, simulators or devices)
+- iOS: CocoaPods (`pod install` in `ios/`)
+
+### 2. Install dependencies
 
 ```bash
-# using npm
-npm start
-
-# OR using Yarn
-yarn start
+npm install
 ```
 
-## Step 2: Start your Application
+### 3. Pose model (required)
 
-Let Metro Bundler run in its _own_ terminal. Open a _new_ terminal from the _root_ of your React Native project. Run the following command to start your _Android_ or _iOS_ app:
+The app loads a MediaPipe Pose Landmarker TFLite model. You must add it yourself:
 
-### For Android
+- See **`assets/README.md`** for where to download the model and how to name it.
+- Place **`pose_landmark_full.tflite`** in the **`assets/`** folder (same folder as this README’s `assets/`).
+
+Without this file, the app will fail when loading the model.
+
+### 4. Run the app
 
 ```bash
-# using npm
+# Start Metro
+npm start
+```
+
+In another terminal:
+
+```bash
+# Android
 npm run android
 
-# OR using Yarn
-yarn android
-```
-
-### For iOS
-
-```bash
-# using npm
+# iOS (after cd ios && pod install)
 npm run ios
-
-# OR using Yarn
-yarn ios
 ```
 
-If everything is set up _correctly_, you should see your new app running in your _Android Emulator_ or _iOS Simulator_ shortly provided you have set up your emulator/simulator correctly.
+---
 
-This is one way to run your app — you can also run it directly from within Android Studio and Xcode respectively.
+## Project Phases (from the master plan)
 
-## Step 3: Modifying your App
+- **Phase 1 – Logic lab (Python):** Done — angles, heuristics, MediaPipe on PC.
+- **Phase 2 – App foundation:** Done — React Native, Vision Camera, Skia.
+- **Phase 3 – On-device ML:** Done — TFLite in app, frame processor, normalized landmarks.
+- **Phase 4 – Native coach MVP:** Current — worklet math, filters, state machine (IDLE → RECORDING → ANALYZING), feedback UI.
+- **Phase 4.5:** TTS, audio cues, alignment ghost.
+- **Phase 5+:** Replay, storage, dashboard, LSTM/ML, LLM coach, AR.
 
-Now that you have successfully run the app, let's modify it.
+---
 
-1. Open `App.tsx` in your text editor of choice and edit some lines.
-2. For **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Developer Menu** (<kbd>Ctrl</kbd> + <kbd>M</kbd> (on Window and Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (on macOS)) to see your changes!
+## Repo structure (high level)
 
-   For **iOS**: Hit <kbd>Cmd ⌘</kbd> + <kbd>R</kbd> in your iOS Simulator to reload the app and see your changes!
+- **`App.tsx`** — Camera, frame processor, TFLite run, smoothing (One Euro + EMA), Skia skeleton, FPS HUD.
+- **`assets/`** — TFLite model(s); see `assets/README.md`.
+- **`metro.config.js`** — Adds `.tflite` to `assetExts` so the model is bundled.
+- **`babel.config.js`** — Worklets + Reanimated plugins for the frame pipeline.
 
-## Congratulations! :tada:
+---
 
-You've successfully run and modified your React Native App. :partying_face:
+## Troubleshooting
 
-### Now what?
+- **Camera permission:** Android has `CAMERA` in `AndroidManifest.xml`. iOS has `NSCameraUsageDescription` in `Info.plist`.
+- **Model not found:** Ensure `assets/pose_landmark_full.tflite` exists and Metro is restarted after adding it.
+- **Build errors:** Run `npm install`, then for iOS: `cd ios && pod install`.
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [Introduction to React Native](https://reactnative.dev/docs/getting-started).
+---
 
-# Troubleshooting
-
-If you can't get this to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+*KickFix: real-time kick correction for Taekwondo and martial arts.*
