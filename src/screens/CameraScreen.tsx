@@ -20,16 +20,23 @@ import {
   isVisibleEnough,
 } from '../engine/KickAnalyzer';
 import { colors, spacing, borderRadius } from '../theme';
-import { KickMode, AppState } from '../types';
+import { KickMode, AppState, EngineData, TrainStackParamList } from '../types';
 import { requestCameraPermission } from '../utils/permissions';
+import { supabase } from '../lib/supabase';
+import { createSession, endSession } from '../services/sessions';
+import { saveKick } from '../services/kicks';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 const { width, height } = Dimensions.get('window');
 
-export default function CameraScreen() {
+type Props = NativeStackScreenProps<TrainStackParamList, 'Camera'>;
+
+export default function CameraScreen({ route }: Props) {
+  const kickMode = route.params?.kickMode ?? 'Roundhouse';
   const insets = useSafeAreaInsets();
   const [hasPermission, setHasPermission] = useState(false);
 
-  const [currentMode, setCurrentMode] = useState<KickMode>('Roundhouse');
+  const [currentMode, setCurrentMode] = useState<KickMode>(kickMode);
   const [totalKicks, setTotalKicks] = useState(0);
   const [goodKicks, setGoodKicks] = useState(0);
   const [feedbackDisplay, setFeedbackDisplay] = useState<string[]>([
@@ -43,9 +50,39 @@ export default function CameraScreen() {
   const activeLeg = useRef<'Left' | 'Right' | null>(null);
   const frameCount = useRef(0);
   const lastTime = useRef(Date.now());
+  const sessionId = useRef<string | null>(null);
+  const userId = useRef<string | null>(null);
+  const currentStreak = useRef(0);
+  const maxStreak = useRef(0);
+  const badKicks = useRef(0);
+  const totalKicksRef = useRef(0);
+  const goodKicksRef = useRef(0);
 
   useEffect(() => {
     requestCameraPermission().then(setHasPermission);
+
+    // Start a session when the screen mounts
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        userId.current = session.user.id;
+        const { data } = await createSession(session.user.id, kickMode);
+        if (data) sessionId.current = data.id;
+      }
+    })();
+
+    // End session when screen unmounts
+    return () => {
+      if (sessionId.current) {
+        endSession(sessionId.current, {
+          total_kicks: totalKicksRef.current,
+          good_kicks: goodKicksRef.current,
+          bad_kicks: badKicks.current,
+          max_streak: maxStreak.current,
+        }).catch(() => {});
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleLandmarks = useCallback(
@@ -132,10 +169,35 @@ export default function CameraScreen() {
               } else {
                 result = analyzeFrontSnap(history, leg, w, h);
               }
-              setFeedbackDisplay(result.feedback);
+
+              const isGoodKick = result.errors.length === 0;
+              setFeedbackDisplay([`Score: ${result.score}/100`, ...result.feedback]);
               setTotalKicks(t => t + 1);
-              if (result.errors.length === 0) {
+              totalKicksRef.current += 1;
+              if (isGoodKick) {
                 setGoodKicks(g => g + 1);
+                goodKicksRef.current += 1;
+                currentStreak.current += 1;
+                if (currentStreak.current > maxStreak.current) {
+                  maxStreak.current = currentStreak.current;
+                }
+              } else {
+                currentStreak.current = 0;
+                badKicks.current += 1;
+              }
+
+              // Persist to Supabase (fire and forget)
+              if (userId.current && sessionId.current) {
+                const engineData: EngineData = {
+                  score: result.score,
+                  feedback: result.feedback,
+                  errors: result.errors,
+                  leg,
+                  peakAngle: result.peakAngle,
+                  kickMode: currentMode,
+                };
+                saveKick(userId.current, sessionId.current, currentMode, engineData)
+                  .catch(e => console.warn('[CameraScreen] saveKick failed:', e));
               }
             } else {
               setFeedbackDisplay([

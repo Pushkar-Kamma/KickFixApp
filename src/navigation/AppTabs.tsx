@@ -1,25 +1,80 @@
 import React from 'react';
 import { StyleSheet, View, Text } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { DashboardScreen, CameraScreen, ProfileScreen } from '../screens';
-import { colors, spacing } from '../theme';
+import HomeStack from './HomeStack';
+import TrainStack from './TrainStack';
+import ProfileStack from './ProfileStack';
+import { colors, spacing, fonts } from '../theme';
 import type { MainTabParamList } from '../types';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
-function TabIcon({ name, focused }: { name: string; focused: boolean }) {
-  const icons: Record<string, string> = {
-    Dashboard: '📊',
-    Camera: '🎯',
-    Profile: '👤',
-  };
+/* ── Geometric Tab Icons — unified 2px stroke outlines ── */
+
+function HomeIcon({ focused }: { focused: boolean }) {
+  const c = focused ? colors.white : colors.tabBarInactive;
+  // Bold solid house: chunky filled square body + triangular roof on top.
   return (
-    <View style={styles.iconContainer}>
-      <Text style={[styles.icon, focused && styles.iconActive]}>
-        {icons[name] ?? '•'}
+    <View style={{ width: 22, height: 22, alignItems: 'center', justifyContent: 'flex-end' }}>
+      {/* Roof: solid downward triangle */}
+      <View style={{
+        position: 'absolute', top: 0,
+        width: 0, height: 0,
+        borderLeftWidth: 11, borderRightWidth: 11, borderBottomWidth: 9,
+        borderLeftColor: 'transparent', borderRightColor: 'transparent',
+        borderBottomColor: c,
+      }} />
+      {/* Body: solid filled square */}
+      <View style={{
+        width: 16, height: 11,
+        backgroundColor: c,
+      }} />
+    </View>
+  );
+}
+
+function TrainIcon({ focused }: { focused: boolean }) {
+  const c = focused ? colors.white : colors.tabBarInactive;
+  // Bold target: thick solid ring + solid center dot. No rounded corners on the cross.
+  return (
+    <View style={{ width: 22, height: 22, alignItems: 'center', justifyContent: 'center' }}>
+      {/* Outer ring — thick stroke */}
+      <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 4, borderColor: c }} />
+      {/* Solid center dot */}
+      <View style={{ position: 'absolute', width: 6, height: 6, backgroundColor: c }} />
+    </View>
+  );
+}
+
+function ProfileIcon({ focused }: { focused: boolean }) {
+  const c = focused ? colors.white : colors.tabBarInactive;
+  // Bold blocky bust: solid square head + solid trapezoidal shoulders. Sharp edges.
+  return (
+    <View style={{ width: 22, height: 22, alignItems: 'center' }}>
+      {/* Head: solid square */}
+      <View style={{ width: 10, height: 10, backgroundColor: c }} />
+      {/* Shoulders: solid wide block */}
+      <View style={{
+        width: 20, height: 10,
+        backgroundColor: c,
+        marginTop: 2,
+      }} />
+    </View>
+  );
+}
+
+function TabItem({ name, focused, IconComponent }: {
+  name: string;
+  focused: boolean;
+  IconComponent: React.FC<{ focused: boolean }>;
+}) {
+  return (
+    <View style={styles.tabItem}>
+      <IconComponent focused={focused} />
+      <Text style={[styles.tabLabel, focused && styles.tabLabelActive]}>
+        {name.toUpperCase()}
       </Text>
-      <Text style={[styles.label, focused && styles.labelActive]}>{name}</Text>
-      {focused && <View style={styles.indicator} />}
+      {focused && <View style={styles.tabIndicator} />}
     </View>
   );
 }
@@ -33,30 +88,24 @@ export default function AppTabs() {
         tabBarShowLabel: false,
       }}>
       <Tab.Screen
-        name="Dashboard"
-        component={DashboardScreen}
+        name="Home"
+        component={HomeStack}
         options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon name="Dashboard" focused={focused} />
-          ),
+          tabBarIcon: ({ focused }) => <TabItem name="Home" focused={focused} IconComponent={HomeIcon} />,
         }}
       />
       <Tab.Screen
-        name="Camera"
-        component={CameraScreen}
+        name="Train"
+        component={TrainStack}
         options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon name="Camera" focused={focused} />
-          ),
+          tabBarIcon: ({ focused }) => <TabItem name="Train" focused={focused} IconComponent={TrainIcon} />,
         }}
       />
       <Tab.Screen
-        name="Profile"
-        component={ProfileScreen}
+        name="ProfileTab"
+        component={ProfileStack}
         options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon name="Profile" focused={focused} />
-          ),
+          tabBarIcon: ({ focused }) => <TabItem name="Profile" focused={focused} IconComponent={ProfileIcon} />,
         }}
       />
     </Tab.Navigator>
@@ -72,33 +121,26 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     elevation: 0,
   },
-  iconContainer: {
+  tabItem: {
     alignItems: 'center',
     justifyContent: 'center',
     width: 64,
   },
-  icon: {
-    fontSize: 22,
-    opacity: 0.5,
-  },
-  iconActive: {
-    opacity: 1,
-  },
-  label: {
+  tabLabel: {
+    fontFamily: fonts.oswaldRegular,
     fontSize: 10,
-    fontWeight: '600',
     color: colors.tabBarInactive,
-    marginTop: 2,
-    letterSpacing: 0.5,
+    marginTop: 4,
+    letterSpacing: 1,
   },
-  labelActive: {
-    color: colors.primary,
+  tabLabelActive: {
+    color: colors.white,
   },
-  indicator: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
+  tabIndicator: {
+    width: 22,
+    height: 5,
+    borderRadius: 2.5,
     backgroundColor: colors.primary,
-    marginTop: 3,
+    marginTop: 4,
   },
 });

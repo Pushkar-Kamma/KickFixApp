@@ -1,0 +1,30 @@
+diff --git a/node_modules/@supabase/auth-js/dist/main/index.js b/node_modules/@supabase/auth-js/dist/main/index.js
+index 27f9e50..546b1cc 100644
+--- a/node_modules/@supabase/auth-js/dist/main/index.js
++++ b/node_modules/@supabase/auth-js/dist/main/index.js
+@@ -10,8 +10,8 @@ const AuthAdminApi_1 = tslib_1.__importDefault(require("./AuthAdminApi"));
+ exports.AuthAdminApi = AuthAdminApi_1.default;
+ const AuthClient_1 = tslib_1.__importDefault(require("./AuthClient"));
+ exports.AuthClient = AuthClient_1.default;
+-tslib_1.__exportStar(require("./lib/types"), exports);
+-tslib_1.__exportStar(require("./lib/errors"), exports);
++tslib_1.__exportStar(require("./lib/types.js"), exports);
++tslib_1.__exportStar(require("./lib/errors.js"), exports);
+ var locks_1 = require("./lib/locks");
+ Object.defineProperty(exports, "navigatorLock", { enumerable: true, get: function () { return locks_1.navigatorLock; } });
+ Object.defineProperty(exports, "NavigatorLockAcquireTimeoutError", { enumerable: true, get: function () { return locks_1.NavigatorLockAcquireTimeoutError; } });
+diff --git a/node_modules/@supabase/auth-js/dist/module/index.js b/node_modules/@supabase/auth-js/dist/module/index.js
+index 01b965d..d38cf25 100644
+--- a/node_modules/@supabase/auth-js/dist/module/index.js
++++ b/node_modules/@supabase/auth-js/dist/module/index.js
+@@ -3,7 +3,7 @@ import GoTrueClient from './GoTrueClient';
+ import AuthAdminApi from './AuthAdminApi';
+ import AuthClient from './AuthClient';
+ export { GoTrueAdminApi, GoTrueClient, AuthAdminApi, AuthClient };
+-export * from './lib/types';
+-export * from './lib/errors';
++export * from './lib/types.js';
++export * from './lib/errors.js';
+ export { navigatorLock, NavigatorLockAcquireTimeoutError, internals as lockInternals, processLock, } from './lib/locks';
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file

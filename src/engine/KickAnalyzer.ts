@@ -182,6 +182,40 @@ export function checkHeight(
 export interface AnalysisResult {
   feedback: string[];
   errors: string[];
+  score: number;
+  peakAngle: number;
+}
+
+/**
+ * Simple deduction scoring: start at 100, subtract per error.
+ * Weights can be tuned later with real training data.
+ */
+const ERROR_DEDUCTIONS: Record<string, number> = {
+  'Dropped Guard': 10,
+  'Low Kick': 15,
+  'Poor Extension': 20,
+  'No Hip Turnover': 10,
+  'Shin not horizontal': 10,
+  'Standing Leg Too Bent': 10,
+  'No Recoil (Leg Dropped)': 10,
+  'Bad Trajectory (Soccer Kick)': 15,
+  'Toes Pointing Up': 10,
+  'Weak Chamber': 10,
+  'Torso Dropped Below Hips': 10,
+  'Knee Dropped During Extension': 10,
+  'Low Knee': 15,
+  'Excessive Lean': 10,
+  'Toes Pointed (Danger)': 10,
+  'Loose Chamber Fold': 10,
+  'Tracking': 0,
+};
+
+export function computeScore(errors: string[]): number {
+  let score = 100;
+  for (const err of errors) {
+    score -= ERROR_DEDUCTIONS[err] ?? 10;
+  }
+  return Math.max(0, Math.min(100, score));
 }
 
 export function analyzeRoundhouse(
@@ -244,6 +278,8 @@ export function analyzeRoundhouse(
     return {
       feedback: ['Incomplete pose data (shoulders).'],
       errors: ['Tracking'],
+      score: 0,
+      peakAngle: 0,
     };
   }
 
@@ -319,7 +355,7 @@ export function analyzeRoundhouse(
     }
   }
 
-  return { feedback, errors };
+  return { feedback, errors, score: computeScore(errors), peakAngle: maxAngle };
 }
 
 export function analyzeSideKick(
@@ -397,6 +433,8 @@ export function analyzeSideKick(
     return {
       feedback: ['Incomplete pose data (shoulders).'],
       errors: ['Tracking'],
+      score: 0,
+      peakAngle: 0,
     };
   }
 
@@ -449,7 +487,7 @@ export function analyzeSideKick(
     }
   }
 
-  return { feedback, errors };
+  return { feedback, errors, score: computeScore(errors), peakAngle: maxAngle };
 }
 
 export function analyzeFrontSnap(
@@ -527,6 +565,8 @@ export function analyzeFrontSnap(
     return {
       feedback: ['Incomplete pose data (shoulders).'],
       errors: ['Tracking'],
+      score: 0,
+      peakAngle: 0,
     };
   }
 
@@ -575,7 +615,7 @@ export function analyzeFrontSnap(
     errors.push('Loose Chamber Fold');
   }
 
-  return { feedback, errors };
+  return { feedback, errors, score: computeScore(errors), peakAngle: maxAngle };
 }
 
 /** Critical landmark indices for visibility gate (Python main loop). */

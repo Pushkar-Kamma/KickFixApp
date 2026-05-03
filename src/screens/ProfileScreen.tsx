@@ -1,83 +1,115 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  StyleSheet,
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  StatusBar,
+  StyleSheet, View, Text, TouchableOpacity, ScrollView, StatusBar, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, spacing, borderRadius, typography } from '../theme';
+import { useIsFocused } from '@react-navigation/native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { colors, spacing, borderRadius, fonts } from '../theme';
+import { supabase } from '../lib/supabase';
+import { getProfile } from '../services/profiles';
+import type { DbProfile, ProfileStackParamList } from '../types';
 
-export default function ProfileScreen() {
+type Props = NativeStackScreenProps<ProfileStackParamList, 'Profile'>;
+
+function InfoRow({ label, value, onEdit }: { label: string; value: string; onEdit?: () => void }) {
+  return (
+    <TouchableOpacity
+      style={styles.infoRow}
+      onPress={onEdit}
+      disabled={!onEdit}
+      activeOpacity={onEdit ? 0.6 : 1}>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <View style={styles.infoRight}>
+        <Text style={styles.infoValue}>{value}</Text>
+        {onEdit && <Text style={styles.editChevron}>›</Text>}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+export default function ProfileScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
+  const isFocused = useIsFocused();
+  const [profile, setProfile] = useState<DbProfile | null>(null);
+  const [email, setEmail] = useState('');
+
+  const loadProfile = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+    setEmail(session.user.email ?? '');
+    const { data } = await getProfile(session.user.id);
+    if (data) setProfile(data);
+  }, []);
+
+  useEffect(() => {
+    if (isFocused) loadProfile();
+  }, [isFocused, loadProfile]);
+
+  const handleSignOut = () => {
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: async () => {
+          await supabase.auth.signOut();
+        },
+      },
+    ]);
+  };
+
+  const initial = (profile?.username ?? 'K')[0].toUpperCase();
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.background} />
       <ScrollView
-        contentContainerStyle={[
-          styles.content,
-          { paddingTop: insets.top + spacing.md },
-        ]}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.md }]}
         showsVerticalScrollIndicator={false}>
 
-        <Text style={typography.h1}>Profile</Text>
+        <Text style={styles.pageTitle}>Profile</Text>
 
-        {/* Avatar */}
+        {/* Avatar + Name */}
         <View style={styles.avatarSection}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>K</Text>
+            <Text style={styles.avatarText}>{initial}</Text>
           </View>
-          <Text style={[typography.h2, { marginTop: spacing.md }]}>
-            KickFix User
-          </Text>
-          <Text style={[typography.body, { marginTop: spacing.xs }]}>
-            Sign in to save your progress
-          </Text>
+          <Text style={styles.username}>{profile?.username ?? 'Fighter'}</Text>
+          <Text style={styles.email}>{email}</Text>
         </View>
 
-        {/* Settings List */}
-        <View style={styles.settingsGroup}>
-          <Text style={[typography.caption, { marginBottom: spacing.sm }]}>
-            ACCOUNT
-          </Text>
-          <TouchableOpacity style={styles.settingsRow} activeOpacity={0.7}>
-            <Text style={styles.settingsLabel}>Sign In / Create Account</Text>
-            <Text style={styles.settingsChevron}>›</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Account */}
+        <Text style={styles.sectionLabel}>ACCOUNT</Text>
+        <InfoRow
+          label="Username"
+          value={profile?.username ?? '—'}
+          onEdit={() => navigation.navigate('EditUsername')}
+        />
+        <InfoRow
+          label="Height"
+          value={profile?.height_cm ? `${profile.height_cm} cm` : '—'}
+          onEdit={() => navigation.navigate('EditProfile')}
+        />
+        <InfoRow
+          label="Belt"
+          value={profile?.belt_level ?? '—'}
+          onEdit={() => navigation.navigate('EditProfile')}
+        />
 
-        <View style={styles.settingsGroup}>
-          <Text style={[typography.caption, { marginBottom: spacing.sm }]}>
-            PREFERENCES
-          </Text>
-          <View style={styles.settingsRow}>
-            <Text style={styles.settingsLabel}>Default Kick Mode</Text>
-            <Text style={styles.settingsValue}>Roundhouse</Text>
-          </View>
-          <View style={styles.settingsDivider} />
-          <View style={styles.settingsRow}>
-            <Text style={styles.settingsLabel}>Camera</Text>
-            <Text style={styles.settingsValue}>Front</Text>
-          </View>
-        </View>
+        {/* Preferences */}
+        <Text style={styles.sectionLabel}>PREFERENCES</Text>
+        <InfoRow label="Training Preference" value="Kicks" />
 
-        <View style={styles.settingsGroup}>
-          <Text style={[typography.caption, { marginBottom: spacing.sm }]}>
-            ABOUT
-          </Text>
-          <View style={styles.settingsRow}>
-            <Text style={styles.settingsLabel}>Version</Text>
-            <Text style={styles.settingsValue}>0.0.1</Text>
-          </View>
-          <View style={styles.settingsDivider} />
-          <View style={styles.settingsRow}>
-            <Text style={styles.settingsLabel}>AI Model</Text>
-            <Text style={styles.settingsValue}>MediaPipe Full</Text>
-          </View>
-        </View>
+        {/* About */}
+        <Text style={styles.sectionLabel}>ABOUT</Text>
+        <InfoRow label="Version" value="0.0.1" />
+        <InfoRow label="AI Model" value="MediaPipe Pose" />
+
+        {/* Sign Out */}
+        <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut} activeOpacity={0.85}>
+          <Text style={styles.signOutText}>SIGN OUT</Text>
+        </TouchableOpacity>
 
         <View style={{ height: spacing.xxl }} />
       </ScrollView>
@@ -86,64 +118,94 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    paddingHorizontal: spacing.lg,
+  container: { flex: 1, backgroundColor: colors.background },
+  content: { paddingHorizontal: spacing.lg },
+
+  pageTitle: {
+    fontFamily: fonts.montserratExtraBold,
+    fontSize: 28,
+    color: colors.textPrimary,
+    marginBottom: spacing.md,
   },
 
-  avatarSection: {
-    alignItems: 'center',
-    paddingVertical: spacing.xl,
-  },
+  avatarSection: { alignItems: 'center', paddingVertical: spacing.xl },
   avatar: {
     width: 88,
     height: 88,
     borderRadius: 44,
     backgroundColor: colors.surfaceLight,
     borderWidth: 2,
-    borderColor: colors.primary,
+    borderColor: colors.white,
     justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: spacing.md,
   },
   avatarText: {
+    fontFamily: fonts.montserratBlack,
     fontSize: 36,
-    fontWeight: '800',
-    color: colors.primary,
+    color: colors.white,
+  },
+  username: {
+    fontFamily: fonts.montserratBold,
+    fontSize: 24,
+    color: colors.textPrimary,
+  },
+  email: {
+    fontFamily: fonts.interRegular,
+    fontSize: 14,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
   },
 
-  settingsGroup: {
-    marginBottom: spacing.lg,
+  sectionLabel: {
+    fontFamily: fonts.oswaldBold,
+    fontSize: 13,
+    color: colors.textPrimary,
+    letterSpacing: 1.5,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
   },
-  settingsRow: {
-    backgroundColor: colors.card,
-    paddingVertical: 16,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
+
+  infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.cardBorder,
   },
-  settingsDivider: {
-    height: 1,
-    backgroundColor: colors.cardBorder,
-  },
-  settingsLabel: {
+  infoLabel: {
+    fontFamily: fonts.interRegular,
     fontSize: 16,
-    fontWeight: '500',
+    color: colors.textSecondary,
+  },
+  infoRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  infoValue: {
+    fontFamily: fonts.interBold,
+    fontSize: 16,
     color: colors.textPrimary,
   },
-  settingsValue: {
-    fontSize: 15,
-    color: colors.textMuted,
-  },
-  settingsChevron: {
+  editChevron: {
+    fontFamily: fonts.interBold,
     fontSize: 22,
     color: colors.primary,
-    fontWeight: '600',
+  },
+
+  signOutButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: spacing.xxl,
+  },
+  signOutText: {
+    fontFamily: fonts.montserratBold,
+    fontSize: 16,
+    color: colors.white,
+    letterSpacing: 1,
   },
 });
