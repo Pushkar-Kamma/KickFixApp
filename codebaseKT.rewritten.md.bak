@@ -1,0 +1,691 @@
+# KickFixApp — Codebase KT (Developer Handoff)
+
+This document explains **what the KickFixApp repo is**, how the app works end-to-end, and what each important file/module does. It is intended to let a developer **continue development immediately** without needing prior context.
+
+---
+
+## 1) Project intent
+
+**KickFix** is a React Native (CLI) mobile app for **real-time martial arts kick form feedback**.
+
+At runtime, the app:
+
+- streams **MediaPipe Pose** landmarks (33 landmarks per frame, **both image-space normalized AND world-space in meters**) from the device camera
+- detects **kick onset** with a knee-velocity heuristic (was ankle-separation in v0)
+- buffers `PoseFrame[]` during the kick (image + world + timestamp per frame)
+- runs a kick-specific analyzer — **Front Snap** uses the new 19-criterion biomechanics engine; **Roundhouse / Side Kick** still use the legacy image-space port (to be migrated)
+- displays **either a Quick HUD** (minimal score + verdict + cue) **or a Full Analysis review** (slow-mo skeleton replay + scrubber + full scorecard)
+- tracks per-session stats (total / good kicks, FPS, streak)
+- stores kick summaries (`kicks` table) and **landmark-only replays** (`kick_frames` table — never video)
+
+The kick analysis logic in TypeScript was originally a port of the desktop reference implementation in `logic.py`, with thresholds adapted to **scale with body size in the frame** (so the app behaves similarly when the user is closer/farther from the camera). The Front Snap analyzer has since been **rewritten on top of MediaPipe world landmarks** for true rotation/scale-invariant biomechanics.
+
+---
+
+## 2) Tech stack & dependency versions
+
+From `package.json`:
+
+### Runtime
+
+- **react-native**: `0.75.4`
+- **react**: `18.3.1`
+- **Pose landmarks provider**: `@thinksys/react-native-mediapipe` `^0.0.19` (wraps Google's Pose Landmarker Tasks API; emits 33 image + 33 world landmarks as JSON via `onLandmark`)
+- **Auth/backend**: `@supabase/supabase-js` `^2.103.2`
+- **Local storage / write-ahead log**: `@react-native-async-storage/async-storage` `^1.24.0` (v1 line — v2 requires Kotlin 2.1+, do not upgrade)
+- **SVG (skeleton replay)**: `react-native-svg` `^15.6.0`
+- **Auth session storage**: `react-native-encrypted-storage` `^4.0.3`
+- **Polyfills**: `react-native-url-polyfill` `^3.0.0`
+
+### Navigation (React Navigation v6)
+
+- `@react-navigation/native` `^6.1.18`
+- `@react-navigation/native-stack` `^6.11.0`
+- `@react-navigation/bottom-tabs` `^6.6.1`
+
+### RN infra libs
+
+- `react-native-gesture-handler` `^2.20.2`
+- `react-native-reanimated` `^3.15.5`
+- `react-native-screens` `^3.35.0`
+- `react-native-safe-area-context` `^4.14.0`
+
+### Tooling
+
+- **TypeScript**: `5.0.4`
+- **ESLint**: `^8.19.0` (extends `@react-native`)
+- **Jest**: `^29.6.3`
+- **patch-package**: `^8.0.1` (used to patch Supabase auth bundle exports; see below)
+- **Prettier**: `2.8.8`
+
+Node engine: `>= 18`
+
+---
+
+## 3) App entrypoints (boot sequence)
+
+### `index.js`
+
+- imports:
+  - `react-native-gesture-handler` (must be first for gesture handler)
+  - `react-native-url-polyfill/auto`
+- registers the root component with `AppRegistry` (`app.json` name)
+
+### `App.tsx`
+
+- wraps the app in `SafeAreaProvider`
+- renders `<RootNavigator />` (the true top-level router)
+
+---
+
+## 4) Navigation architecture
+
+This app uses React Navigation v6 and type-safe param lists defined in `src/types/index.ts`.
+
+### Navigation types (`src/types/index.ts`)
+
+- `RootStackParamList`: `{ Auth, ProfileSetup, MainTabs }`
+- `AuthStackParamList`: `{ Welcome, Login, SignUp, OTP, ForgotPassword, ForgotPasswordOTP, NewPassword, PasswordUpdated }`
+- `MainTabParamList`: `{ Home, Train, ProfileTab }`
+- `HomeStackParamList`: `{ Dashboard, SetGoals, KickHistory }`
+- `TrainStackParamList`: `{ TrainSelect, Camera, KickReview }` — **`KickReview` was added with the Full Analysis flow**
+- `ProfileStackParamList`: `{ Profile, EditUsername, EditProfile }`
+- Also contains kick data shapes:
+  - `KickResult`, `KickSession` — local in-memory shapes (legacy)
+  - `EngineData` — what's stored in `kicks.engine_data` jsonb
+  - `DbProfile`, `DbSession`, `DbKick` — Supabase row shapes
+  - `CompactLandmark`, `CompactFrame`, `DbKickFrames` — **NEW** — landmark replay storage shapes
+  - `AnalysisMode = 'Quick' | 'Full'`
+
+### `src/navigation/RootNavigator.tsx`
+
+Auth-gated root switch:
+
+- Maintains `session: Session | null`
+- On mount:
+  - `supabase.auth.getSession()`
+  - subscribes to `supabase.auth.onAuthStateChange(...)`
+- Chooses which root stack screen to render:
+  - authenticated (`!!session?.user`) → `MainTabs` (`AppTabs`)
+  - missing profile row → `ProfileSetup`
+  - not authenticated → `Auth` (`AuthStack`)
+
+### `src/navigation/AuthStack.tsx`
+
+Native stack: Welcome / Login / SignUp / OTP / ForgotPassword / ForgotPasswordOTP / NewPassword / PasswordUpdated.
+
+### `src/navigation/AppTabs.tsx`
+
+Bottom tabs:
+
+- `Home` → `HomeStack` (Dashboard / SetGoals / KickHistory)
+- `Train` → `TrainStack` (TrainSelect / Camera / KickReview)
+- `ProfileTab` → `ProfileStack` (Profile / EditUsername / EditProfile)
+
+Notes:
+
+- Tabs use **custom geometric icons** with a red dash indicator under the active tab (was emoji icons in v0).
+- `headerShown: false` is used throughout; screens self-render their own headers/branding.
+
+### `src/navigation/TrainStack.tsx`
+
+- `TrainSelect` → user picks kick type + analysis mode
+- `Camera` → live training session (Quick or Full)
+- `KickReview` → post-kick review screen (Full mode only) — **NEW**
+
+---
+
+## 5) Camera → landmarks → kick detection → analysis (core runtime flow)
+
+Implemented across:
+
+- `src/screens/TrainSelectScreen.tsx` (kick + mode picker)
+- `src/screens/CameraScreen.tsx` (frame ingestion + state machine + Quick HUD)
+- `src/screens/KickReviewScreen.tsx` (Full Analysis review — **NEW**)
+- `src/components/SkeletonReplay.tsx` (SVG pose renderer — **NEW**)
+- `src/engine/biomech.ts` (primitives, vec3 math, `PoseFrame` type — **NEW**)
+- `src/engine/FrontSnapAnalyzer.ts` (19-criterion scorer — **NEW**)
+- `src/engine/KickAnalyzer.ts` (legacy Roundhouse / Side Kick / Front Snap — Front Snap is superseded but the file is still imported by Roundhouse + Side Kick)
+
+### 5.1 Train selection (`src/screens/TrainSelectScreen.tsx`)
+
+- 3 large kick cards (Roundhouse / Front Snap / Side Kick) using image assets from `assets/Images/`
+- Tapping a card opens a bottom-sheet modal with:
+  - "▶ Technique Video" link (stub — videos coming later)
+  - **QUICK ANALYSIS** (red CTA, primary)
+  - **FULL ANALYSIS** (ghost button, secondary)
+- Selection navigates to `Camera` with `{ kickMode, analysisMode }` route params
+
+### 5.2 Landmarks ingestion (MediaPipe)
+
+`CameraScreen.tsx` renders:
+
+- `<RNMediapipe ... onLandmark={handleLandmarks} />`
+
+The `handleLandmarks` callback:
+
+- accepts `data: any` from native; parses JSON if it's a string (the native side `gson.toJson`s the payload)
+- extracts both `landmarks` (33 image-space, x,y in [0,1]) **and** `worldLandmarks` (33 world meters from hip midpoint) and `additionalData: { width, height }`
+- requires both arrays to be length ≥ 33
+
+### 5.3 Tracking/visibility gate
+
+Before any kick logic runs, we ensure the critical joints are reliably tracked:
+
+- `frameUsable(image, visMin=0.5, presMin=0.5)` from `biomech.ts` (replaces the older `isVisibleEnough`)
+- Checks **both visibility AND presence** on critical joints (hips, knees, ankles, shoulders) — `presence` drops faster than `visibility` for occluded joints, so checking both gives more honest "ghost kick" rejection
+- Visibility threshold default: `0.5` (was `0.6` in v0)
+
+If tracking is lost during recording, the app aborts the kick and resets buffers to avoid analyzing noisy frames.
+
+### 5.4 Kick start/stop (knee-velocity onset detector)
+
+This **replaces** the old ankle-Y separation heuristic.
+
+In `CameraScreen.tsx`:
+
+- Per frame, computes the Δy of each knee in image space (`lastKneeY` ref vs current)
+- Triggers RECORDING when:
+  - `maxRise > KNEE_VEL_ONSET (0.06 normalized units / frame)` — a knee is rising fast
+  - **AND** the user is standing (`hipY < kneeY`)
+- A **5-frame pre-roll** buffer is included so chamber prep is captured (we keep the last 5 frames in `preRoll` regardless of state)
+
+End condition for RECORDING:
+
+- ankle returns near ground (`min(lAnkleY, rAnkleY) > hipY + 0.15`) AND buffer length > `MIN_KICK_FRAMES (8)`
+- OR safety cap: buffer exceeds 60 frames (~2s)
+
+A **6-frame cooldown** prevents back-to-back false triggers.
+
+### 5.5 State machine and buffering
+
+State is kept in refs (to reduce render churn):
+
+- `phaseRef`: `'IDLE' | 'RECORDING' | 'COOLDOWN'`
+- `buffer`: `PoseFrame[]` (each frame contains `{ image, world, t }`)
+- `preRoll`: `PoseFrame[]` (rolling 5 frames)
+- `cooldownLeft`: number
+- per-session stat refs: `totalKicks`, `goodKicks`, `badKicks`, `maxStreak`, `curStreak`
+- `isPausedRef` — set true while user is on KickReview to ignore incoming frames
+
+Flow:
+
+1. **IDLE → RECORDING** when knee-velocity onset detected. Buffer is seeded with the pre-roll so chamber prep is captured.
+2. **RECORDING**: each frame is pushed into `buffer`.
+3. End condition fires → captured buffer is moved to `finalizeKick()`, phase → COOLDOWN, then back to IDLE after 250ms.
+
+### 5.6 Analysis (Front Snap — new engine)
+
+`finalizeKick(frames)`:
+
+1. If `frames.length < MIN_KICK_FRAMES (8)` — show "ignored" message and return
+2. Detect kicking leg via `detectKickingLeg(frames.map(f => f.image))`
+3. Defer the actual analysis with `InteractionManager.runAfterInteractions(...)` so animations finish first
+4. Call `analyzeFrontSnap(frames, leg)` → `FrontSnapResult`
+5. Update Quick HUD state (score, verdict, headline cue, kick count)
+6. Persist:
+   - `saveKick(userId, sessionId, kickMode, engineData)` → `kicks` table summary
+   - On insert success → `saveKickFrames({ kickId, userId, frames, peakIdx, chamberIdx, leg })` → `kick_frames` table + local cache
+7. If `analysisMode === 'Full'` → set `isPausedRef = true` and `navigation.navigate('KickReview', { kickId })`
+
+**Quick HUD layout (bottom of screen):**
+- Big 96pt score number
+- 32pt verdict (`SNAP / PUSH / LOW / SLOPPY / GOOD`) — colored by category
+- Single-line headline cue underneath (the top failure's coaching message)
+
+Resume detection on returning from review: `navigation.addListener('focus', ...)` resets `isPausedRef`, `phaseRef`, `buffer` so the next kick is detected fresh.
+
+### 5.7 Performance fixes baked in
+
+- **JSON.parse only when frame received** — frames during cooldown/pause are ignored before parse
+- **FPS counter via ref** — `fpsCount` ref increments per frame; `setFps` only fires once per second (no per-frame re-render)
+- **Heavy work deferred** — analyzer + saves run inside `InteractionManager.runAfterInteractions`
+- **Refs for transient state** — only score/verdict/cue/count/phase/fps trigger re-renders
+
+### 5.8 Legacy analyzers (`src/engine/KickAnalyzer.ts`)
+
+Still exports:
+
+- `analyzeRoundhouse(history, activeLeg, w, h)`
+- `analyzeSideKick(history, activeLeg, w, h)`
+- `analyzeFrontSnap(history, activeLeg, w, h)` — **superseded** by `FrontSnapAnalyzer.ts`; only kept for parity with the other two until they're ported
+- `MIN_FRAME_COUNT`, `JOINTS`, `Point`, `kickAnkleSeparationThreshold`, `isVisibleEnough`
+
+These return:
+
+- `AnalysisResult = { feedback: string[], errors: string[], score: number, peakAngle: number }`
+
+**How legacy analyzers choose the "best frame":** scan buffered history, take the frame with maximum knee extension angle. Most checks done on that peak frame.
+
+**Scale-aware thresholds:** the original Python used hardcoded pixels. In TS we compute body metrics per frame:
+
+- `bodyMetrics(lm, w, h)` → `{ leg, hipW, shoulderW }` in px
+- Thresholds expressed as ratios (`R_KICK_ANKLE_SEP`, `R_HIP_SHIFT_Y`, `R_SHIN_Y`, `R_FOOT_Y`, `R_TRAJ_X`, `R_CHAMBER_X`, `R_LEAN_X`) and multiplied by current body metrics
+
+This reduces sensitivity to camera distance.
+
+---
+
+## 6) The biomechanics engine (NEW)
+
+### 6.1 `src/engine/biomech.ts` — primitives
+
+- `J` — landmark index map (NOSE, L_HIP, R_KNEE, L_FOOT_INDEX, etc.)
+- `Landmark` — `{ x, y, z, visibility?, presence? }`
+- **`PoseFrame`** — `{ image: Landmark[]; world: Landmark[]; t: number }` (the unit of buffered data)
+- `Vec3` math: `sub`, `add`, `scale`, `dot`, `norm`, `dist`, `mid`
+- **`angle3D(a, b, c)`** — true 3D angle in degrees
+- `lm` / `lmReq` — pull a landmark by index as `Vec3`
+- `frameUsable(image)` — checks **both visibility AND presence ≥ 0.5** on critical joints
+- `deriveScalar` / `deriveVec3` — discrete first derivatives (deg/s or m/s)
+- `argmax` — find peak frame index
+- `detectKickingLeg(imageFrames)` — returns `'Left' | 'Right'` based on which ankle is higher around the kick midpoint
+
+### 6.2 `src/engine/FrontSnapAnalyzer.ts` — the 19-criterion scorer
+
+**Why two coordinate systems?** Image landmarks (`x,y ∈ [0,1]`) are great for screen-space checks (e.g. "ankle above hip on screen"). But angles and velocities computed from image space change when the user moves closer/further. **World landmarks are in meters from the hip midpoint** — rotation/scale invariant — perfect for true biomechanics. The analyzer uses world for all angles/velocities/distances and only image for "is X above Y on screen" tests.
+
+**Phases & criteria (19 total):**
+
+| # | Criterion | Phase | Severity | Signal |
+|---|---|---|---|---|
+| 1 | Standing leg dynamic bend (150°–178°) | Setup | minor | world angle hip→knee→ankle |
+| 2 | Knee at hip height in chamber | Chamber | major | image kneeY ≤ hipY |
+| 3 | Tight chamber fold | Chamber | minor | world heel↔hip / upper-leg < 0.85 |
+| 4 | Chamber duration ≤ 280ms | Chamber | minor | t[chamberPeak] − t[0] |
+| 5 | Support heel planted | Chamber | minor | image footY − heelY < 0.03 |
+| 6 | No pelvic drop | Chamber | minor | world ΔY hips < 0.05m |
+| 7 | Peak knee extension 168°–182° | Extension | **critical** | world angle hip→knee→ankle at peak |
+| 8 | Peak ankle ≥ hip height | Extension | major | image ankleY ≤ hipY |
+| 9 | Knee snap velocity ≥ 600°/s | Extension | **critical** | max derivative of knee angle (the snap engine) |
+| 10 | Toes pulled back (<115°) | Extension | **critical** | world angle knee→ankle→foot |
+| 11 | Hip thrust forward ≥ 3cm | Extension | major | world ΔZ hip mid |
+| 12 | No abduction flare | Extension | major | world knee X within 0.6 × hip-width of hip X |
+| 13 | Vertical torso (<25° lean) | Posture | major | world shoulder→hip vector vs vertical |
+| 14 | Hips square to shoulders | Posture | minor | transverse-plane angle diff |
+| 15 | Recoil/extension velocity ratio ≥ 0.7 | Recoil | **critical** | the snap-vs-push test |
+| 16 | Foot retracts before dropping | Recoil | major | world Δz ≥ Δy in 5 frames post-peak |
+| 17 | Knee elevated during recoil | Recoil | minor | image kneeY doesn't drop > footY |
+| 18 | Apex dwell ≤ 3 frames | Recoil | minor | how long foot stays at peak Z |
+| 19 | Total execution time | Reset | info | tracked, no deduction |
+
+**Severity weights:** critical 15 / major 8 / minor 4 / info 0. Score starts at 100, deducts per failed criterion, clamped 0–100.
+
+**Outputs (`FrontSnapResult`):**
+
+- `score: 0–100`
+- `verdict: 'SNAP' | 'PUSH' | 'LOW' | 'SLOPPY' | 'GOOD'` — derived from highest-weight failure
+- `tier: 'Novice' | 'Intermediate' | 'Advanced' | 'Elite'` — score bands at 55 / 75 / 90
+- `headlineCue: string` — single coaching line for the top failure
+- `criteria: CriterionResult[]` — full per-criterion breakdown with measured value, target, severity, cue
+- `metrics: { peakKneeAngleDeg, peakKneeAngularVelDegPerSec, peakFootSpeedMS, extensionMs, chamberMs, totalMs, recoilToExtensionRatio }`
+- `peakFrameIdx`, `chamberFrameIdx` — for replay seek
+
+**Threshold calibration:** all current thresholds are educated defaults synthesized from research. They will need tuning once we have real captured kicks.
+
+### 6.3 KickReviewScreen + SkeletonReplay (Full Analysis UI)
+
+`src/screens/KickReviewScreen.tsx`:
+
+1. Reads `kickId` from route params
+2. Calls `loadKickFrames(kickId)` — checks AsyncStorage cache first, then Supabase
+3. Re-runs `analyzeFrontSnap` on the loaded frames (single source of truth — same engine as live)
+4. Renders:
+   - Big score (88pt) + tier + colored verdict
+   - **Skeleton replay box** — `<SkeletonReplay landmarks={...} />` with kicking leg highlighted red, looping at 8fps
+   - **Playback controls**: ◀ frame back / play-pause / ▶ frame forward
+   - **Scrubber** with chamber + peak frame markers
+   - **CHAMBER** and **PEAK FRAME** jump buttons
+   - **Metric tiles** (3-col grid): peak angle, snap speed, foot speed, extension ms, chamber ms, recoil/extension ratio
+   - **Issues** list (failing criteria with cue)
+   - **Passed** list (passing criteria)
+   - **NEXT KICK** button → returns to Camera (which auto-resumes detection on focus)
+
+`src/components/SkeletonReplay.tsx`:
+
+- Stateless SVG renderer — parent controls which frame to show
+- Draws all body connections as `<Line>` and key joints as `<Circle>`
+- `highlightLeg` prop colors the kicking-leg lines red
+
+---
+
+## 7) Storage: kicks + landmark replays
+
+### 7.1 We do NOT save video — clarification
+
+**The app never saves video files.** Only MediaPipe **landmark coordinates** are persisted (33 image-space + 33 world-space points per frame, ~25 KB compacted per kick). The replay shown in `KickReviewScreen` is rendered from these landmarks as a **skeleton animation** — it is a stick-figure reconstruction of the kick, not real video footage of the user.
+
+If you want the replay to also show the **actual video footage of the person** (with the skeleton overlaid), that would require recording video during the kick (using `react-native-vision-camera` since `@thinksys/react-native-mediapipe` doesn't expose frames), holding it in temp storage during review, and dropping it on NEXT KICK. That feature is **not yet implemented** — pending product decision.
+
+### 7.2 Tables
+
+**`kicks`** (existed since v0 — engine summary):
+
+- `id, user_id, session_id, kick_type, engine_data jsonb, created_at`
+- `engine_data` shape: `{ score, feedback[], errors[], leg, peakAngle, kickMode }`
+- Written by `src/services/kicks.ts → saveKick()`
+
+**`kick_frames`** (NEW — landmark replay):
+
+- `id, kick_id (→ kicks), user_id (→ auth.users), frames jsonb, peak_frame_idx, chamber_frame_idx, leg, created_at`
+- `frames` is a compact array — see `CompactFrame` in `src/types/index.ts`:
+  - per frame: `{ i: [[x,y,z,vis,pres] × 33], w: [[x,y,z,vis,pres] × 33], t: ms_from_start }`
+  - all values rounded to 4 decimals
+- Written by `src/services/kickFrames.ts → saveKickFrames()`
+- RLS enforced: user can only see/insert/delete their own rows
+
+### 7.3 SQL migration — what to run in Supabase
+
+The migration file is at [supabase/migrations/002_kick_frames.sql](supabase/migrations/002_kick_frames.sql).
+
+**Steps:**
+
+1. Open your Supabase dashboard → **SQL Editor** → **New query**
+2. Paste the contents of `supabase/migrations/002_kick_frames.sql`
+3. Click **Run**
+4. Verify in **Table Editor** that `kick_frames` exists with RLS enabled
+
+**What it does:**
+
+- Creates the `kick_frames` table with foreign keys to `kicks` and `auth.users` (cascade-delete on user removal)
+- Creates indexes on `kick_id` and `user_id` for fast lookup
+- Enables RLS with three policies: users can SELECT / INSERT / DELETE only their own rows
+
+**What if you skip it?** The app still works end-to-end — kicks are scored and their summaries save to the existing `kicks` table. Replays cache locally via AsyncStorage so the review screen works on the device that captured the kick. But the cloud sync of replays will fail silently (errors logged to console only) and replays won't be available across devices.
+
+### 7.4 Offline-first write-ahead log (`src/services/kickFrames.ts`)
+
+`saveKickFrames()` flow:
+
+1. Check `getSaveReplaysEnabled()` — if user disabled the setting, skip entirely
+2. Compact the `PoseFrame[]` (rounding + relative timestamps)
+3. **Write to local cache immediately** (`AsyncStorage` key `@kickfix:kick:{kickId}`) — this is what makes replay instantly available
+4. **Append to write-ahead log** (`@kickfix:wal:kickFrames`)
+5. Fire-and-forget `flushWAL()` — tries to insert each WAL entry to Supabase; failed inserts stay in the WAL for next attempt
+
+`loadKickFrames()` reads cache first, falls back to Supabase. This means if the user is offline, replays from this device still work; replays from other devices need network.
+
+**Settings toggle:** `getSaveReplaysEnabled() / setSaveReplaysEnabled()` — default ON. There's no UI for this yet (planned: Profile → Settings).
+
+---
+
+## 8) Supabase integration (auth)
+
+Supabase is used for **authentication** (email/password + email OTP verification) and now also **kick storage** (`kicks` and `kick_frames` tables — see §7).
+
+### 8.1 Credentials config
+
+File: `src/config/env.ts`
+
+- Exports:
+  - `SUPABASE_URL`
+  - `SUPABASE_ANON_KEY`
+
+These are currently checked into source as constants. The repo's `.gitignore` ignores `.env`; the comment indicates credentials may also exist in a local `.env` for dev, but the runtime code reads from `env.ts`.
+
+### 8.2 Supabase client
+
+File: `src/lib/supabase.ts`
+
+- Creates `supabase` with:
+  - `persistSession: true`
+  - `autoRefreshToken: true`
+  - `detectSessionInUrl: false` (important for native)
+
+#### Session storage
+
+`supabase.ts` implements a storage adapter:
+
+- tries `NativeModules.RNEncryptedStorage`
+- if missing/unlinked, falls back to an in-memory `Map`
+
+Effect:
+
+- auth will still work while the app is running
+- but session will not persist across app restarts unless encrypted storage is available
+
+### 8.3 Session gating
+
+File: `src/navigation/RootNavigator.tsx`
+
+- on mount: `supabase.auth.getSession()`
+- subscribes: `supabase.auth.onAuthStateChange`
+- routes user to the main app only when a session exists with `session.user`
+- routes to `ProfileSetup` if the user has no profile row yet
+
+### 8.4 Auth screens
+
+- `src/screens/SignInScreen.tsx` — `supabase.auth.signInWithPassword({ email, password })`
+- `src/screens/SignUpScreen.tsx` — `supabase.auth.signUp({ email, password })`
+- `src/screens/OTPScreen.tsx` — `supabase.auth.verifyOtp({ email, token: code, type: 'signup' })`
+- `src/screens/ForgotPasswordScreen.tsx` / `ForgotPasswordOTPScreen.tsx` / `NewPasswordScreen.tsx` / `PasswordUpdatedScreen.tsx` — full password reset flow
+- `src/screens/WelcomeScreen.tsx` — landing screen for unauthenticated users
+- `src/screens/ProfileSetupScreen.tsx` — first-time sign-in profile creation (username + height)
+
+### 8.5 Metro bundling patch for Supabase auth
+
+File: `patches/@supabase+auth-js+2.103.2.patch`
+
+- patches `@supabase/auth-js` exports to include explicit `.js` extensions for types/errors exports
+- applied via `postinstall: patch-package` in `package.json`
+
+---
+
+## 9) UI system (theme + styling conventions)
+
+Theme tokens:
+
+- `src/theme/colors.ts` — strict B/W/R palette
+- `src/theme/spacing.ts` — spacing scale + border radii
+- `src/theme/typography.ts` — `h1/h2/h3/body/caption/stat` styles + custom font names
+- `src/theme/index.ts` — barrel exports
+
+**Color palette (strict B/W/R):**
+
+- Background `#000000`
+- Card `#2A2424` (warm-tinted dark grey) with `#222222` border
+- **Primary brand red** `#D32F2F` (Ferrari red)
+- White accent `#FFFFFF`
+- Text muted `#7A7A7A`
+
+**Typography:** Montserrat (Black/Bold/ExtraBold), Oswald (Bold/Regular), Inter (Medium/Regular). Loaded via `react-native-asset` link to native fonts folders (`assets/fonts/`).
+
+**Spacing:** 4 / 8 / 16 / 24 / 32 / 48 (xs → xxl). Border radius: 8 / 12 / 16 / 24 (sm → xl).
+
+Screens follow consistent "premium athletic" patterns:
+
+- pure black background
+- sharp 4px corners on cards (geometric, not rounded pill aesthetic)
+- bold uppercase headers with letter-spacing
+- primary CTA = solid red; secondary = ghost (transparent + white border)
+- B/W/R only, no other accent colors
+
+---
+
+## 10) Screens overview (what each screen does today)
+
+### `src/screens/TrainSelectScreen.tsx`
+
+Entry point for training. Shows greeting + "LET'S TRAIN AND GET BETTER" header. Three large kick cards with image assets. Tapping opens a bottom sheet to choose Quick or Full Analysis (or open a Technique Video stub).
+
+### `src/screens/CameraScreen.tsx`
+
+**Rewritten** for the new biomech engine. Live training screen:
+
+- requests camera permission via `requestCameraPermission()`
+- renders the MediaPipe landmark stream view
+- knee-velocity onset detection + 5-frame pre-roll buffering
+- runs `analyzeFrontSnap` after each kick (deferred via `InteractionManager`)
+- HUD: top — mode pill, FPS, kick count, RECORDING indicator; bottom — big score number, verdict, headline cue
+- Routes to `KickReview` for Full mode after each kick
+
+### `src/screens/KickReviewScreen.tsx` (NEW)
+
+Full Analysis post-kick review. See §6.3 for full layout. Slow-mo skeleton replay + scrubber + scorecard + NEXT KICK button.
+
+### `src/screens/DashboardScreen.tsx`
+
+Final state — pure black bg, "YOUR STATS" h2, no streak counter. Stat cards: KICKS / ACCURACY / SESSIONS. Action buttons (Set Goals, Kick History) — white text, red icons.
+
+### `src/screens/ProfileScreen.tsx`
+
+Profile + settings hub. Shows username/email/belt level, links to Edit Username, Edit Profile, sign out.
+
+### `src/screens/KickHistoryScreen.tsx`
+
+Placeholder — wire up to read `kicks` rows and link into `KickReview` (planned).
+
+### `src/screens/SetGoalsScreen.tsx`
+
+Placeholder for goal-setting feature.
+
+### Auth screens
+
+- `SignInScreen.tsx`, `SignUpScreen.tsx`, `WelcomeScreen.tsx`
+- `OTPScreen.tsx`, `ForgotPasswordScreen.tsx`, `ForgotPasswordOTPScreen.tsx`, `NewPasswordScreen.tsx`, `PasswordUpdatedScreen.tsx`
+- `ProfileSetupScreen.tsx` — first-time profile creation
+- `EditUsernameScreen.tsx`, `EditProfileScreen.tsx`
+
+### `src/screens/AuthScreen.tsx`
+
+Present in the repo but not used in navigation. Older scaffold, can be removed.
+
+### `src/screens/index.ts`
+
+Barrel exports for all screens.
+
+---
+
+## 11) Services (data layer)
+
+- `src/services/profiles.ts` — `getProfile(userId)`, `upsertProfile(...)` — `profiles` table
+- `src/services/sessions.ts` — `createSession(userId, mode)`, `endSession(id, stats)` — `sessions` table
+- `src/services/kicks.ts` — `saveKick(...)`, `getKicksForSession(...)`, `getRecentKicks(...)` — `kicks` table
+- `src/services/kickFrames.ts` (NEW) — `saveKickFrames`, `loadKickFrames`, `flushWAL`, `getSaveReplaysEnabled`, `setSaveReplaysEnabled` — `kick_frames` table + AsyncStorage WAL/cache
+
+---
+
+## 12) Utilities
+
+### `src/utils/permissions.ts`
+
+Android camera permission request helper:
+
+- Android: prompts for `CAMERA`
+- iOS: returns true (native iOS permission strings must still exist in Info.plist)
+
+---
+
+## 13) Build and configuration
+
+### TypeScript
+
+- `tsconfig.json` extends `@react-native/typescript-config/tsconfig.json`
+
+### Metro
+
+- `metro.config.js` adds `.tflite` to Metro `assetExts` (model bundling support)
+
+### Babel
+
+- `babel.config.js` uses RN preset + `react-native-reanimated/plugin`
+
+### ESLint
+
+- `.eslintrc.js` extends `@react-native`
+
+### Jest
+
+- `jest.config.js` preset `react-native`
+
+### Git ignore
+
+- `.gitignore` ignores `node_modules/`, build outputs, `.env`, etc.
+
+---
+
+## 14) Android build notes
+
+### `android/gradle.properties`
+
+- `newArchEnabled=false`
+- `hermesEnabled=true`
+- Kotlin 1.9.24 (do **not** upgrade `@react-native-async-storage/async-storage` to v2.x — it requires Kotlin 2.1+)
+
+Min SDK 24 (required by MediaPipe).
+
+---
+
+## 15) MediaPipe specifics (gotchas)
+
+The `@thinksys/react-native-mediapipe` package wraps Google's Pose Landmarker Tasks API.
+
+- **Native model bundled:** `pose_landmarker_full.task` (full variant — best accuracy/speed balance)
+- **Running mode:** `LIVE_STREAM` (async callback)
+- **Confidences:** detection / presence / tracking all default `0.5`, hardcoded native-side (no JS prop)
+- **`onLandmark` payload:** JSON **string** emitted via DeviceEventEmitter — must `JSON.parse`. Per-frame parse is the #1 lag risk → mitigated by skipping parses during cooldown/pause and isolating FPS state to 1Hz updates
+- **Landmarks emitted:** both `landmarks` (33 image-normalized) AND `worldLandmarks` (33 world meters from hip midpoint) AND `additionalData: { width, height }`
+- **`frameLimit` prop is iOS-only.** Android runs at whatever the camera analyzer can sustain (~25–30 fps mid-range)
+- **Cannot host inside `Modal` or `BottomSheet`** — the underlying Fragment goes black. We render `<RNMediapipe>` as the root of `CameraScreen`
+- **Visibility scores stay near 1.0** for limbs that just left the frame (it's tracking confidence, not occlusion). Use `presence` instead — `frameUsable()` checks both
+- **Does NOT expose camera frames** — if we ever want to record actual video for replay, we'd need to add `react-native-vision-camera` alongside
+
+---
+
+## 16) Repo layout (current)
+
+```
+src/
+  components/
+    SkeletonReplay.tsx          ← NEW — SVG skeleton renderer for replay
+    camera/  common/  dashboard/
+  config/env.ts                 ← Supabase URL + anon key
+  context/
+  engine/
+    biomech.ts                  ← NEW — primitives, vec3 math, frame types
+    FrontSnapAnalyzer.ts        ← NEW — 19-criterion scorer
+    KickAnalyzer.ts             ← LEGACY — Roundhouse + SideKick still use this
+  hooks/
+  lib/supabase.ts
+  navigation/
+    AppTabs.tsx  AuthStack.tsx  HomeStack.tsx
+    ProfileStack.tsx  RootNavigator.tsx
+    TrainStack.tsx              ← TrainSelect / Camera / KickReview
+  screens/
+    CameraScreen.tsx            ← REWRITTEN — knee-vel detection, perf fixes, mode routing
+    KickReviewScreen.tsx        ← NEW — slow-mo replay + scorecard
+    TrainSelectScreen.tsx       ← kick picker + bottom sheet
+    DashboardScreen.tsx, ProfileScreen.tsx, ...auth screens
+  services/
+    kicks.ts                    ← summary writes
+    kickFrames.ts               ← NEW — landmark storage + WAL + cache
+    sessions.ts  profiles.ts
+  theme/
+  types/index.ts                ← + KickReview route, CompactFrame, DbKickFrames
+  utils/permissions.ts
+
+supabase/migrations/
+  002_kick_frames.sql           ← NEW — run in Supabase SQL editor
+
+assets/
+  Images/                       ← kick icons (Roundhouse / Front / Side)
+  fonts/                        ← Montserrat / Oswald / Inter
+  pose_landmark_full.tflite     ← unused at runtime (bundled inside thinksys pkg)
+
+android/  ios/                  ← native projects
+patches/                        ← Supabase auth-js patch
+```
+
+---
+
+## 17) Where to pick up next
+
+Likely tracks:
+
+1. **Threshold calibration for Front Snap** — capture 10–20 real kicks of varying quality, manually label, tune the 19 thresholds in `FrontSnapAnalyzer.ts`
+2. **Real video replay** (pending product decision) — add `react-native-vision-camera`, record during kick, hold temp file, play under skeleton in review, drop on NEXT KICK
+3. **Port Roundhouse + Side Kick** to the new `biomech.ts` + world-landmark engine using the same `CriterionResult` shape
+4. **Settings UI** — add toggle for "Save kick replays" in Profile screen
+5. **Technique videos** — bundle MP4 per kick type, add player screen wired to the "▶ Technique Video" link in the Train bottom sheet
+6. **Kick history** — `KickHistoryScreen` exists as a placeholder; wire it to read `kicks` rows and let the user tap into a saved kick to open `KickReview`
+7. **Android performance pass** — measure JS frame parse cost on real devices; consider moving to a JSI-based emit if it's bottlenecked

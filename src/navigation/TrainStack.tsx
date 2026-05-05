@@ -1,6 +1,6 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { TrainSelectScreen, CameraScreen } from '../screens';
+import { TrainSelectScreen, CameraScreen, KickReviewScreen } from '../screens';
 import type { TrainStackParamList } from '../types';
 
 const Stack = createNativeStackNavigator<TrainStackParamList>();
@@ -10,6 +10,7 @@ export default function TrainStack() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="TrainSelect" component={TrainSelectScreen} />
       <Stack.Screen name="Camera" component={CameraScreen} />
+      <Stack.Screen name="KickReview" component={KickReviewScreen} />
     </Stack.Navigator>
   );
 }

@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import type { DbKick, EngineData } from '../types';
+import { readCachedRecentKicks, writeCachedRecentKicks } from './kicksCache';
 
 export async function saveKick(
   userId: string,
@@ -7,7 +8,7 @@ export async function saveKick(
   kickType: string,
   engineData: EngineData,
 ) {
-  return supabase
+  const result = await supabase
     .from('kicks')
     .insert({
       user_id: userId,
@@ -17,6 +18,14 @@ export async function saveKick(
     })
     .select()
     .single<DbKick>();
+
+  // Best-effort: prepend to local cache so history is up to date next time it opens.
+  if (result.data) {
+    readCachedRecentKicks(userId)
+      .then(cached => writeCachedRecentKicks(userId, [result.data!, ...cached]))
+      .catch(() => {});
+  }
+  return result;
 }
 
 export async function getKicksForSession(sessionId: string) {
@@ -36,4 +45,8 @@ export async function getRecentKicks(userId: string, limit = 20) {
     .order('created_at', { ascending: false })
     .limit(limit)
     .returns<DbKick[]>();
+}
+
+export async function deleteKick(kickId: string) {
+  return supabase.from('kicks').delete().eq('id', kickId);
 }

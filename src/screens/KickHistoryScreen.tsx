@@ -1,31 +1,108 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
-  StyleSheet, View, Text, TouchableOpacity, ScrollView, StatusBar, FlatList,
+  StyleSheet, View, Text, TouchableOpacity, ScrollView, StatusBar, Alert, ActivityIndicator, Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { colors, spacing, borderRadius, fonts } from '../theme';
 import { supabase } from '../lib/supabase';
-import { getRecentKicks } from '../services/kicks';
+import { getRecentKicks, deleteKick } from '../services/kicks';
+import { readCachedRecentKicks, writeCachedRecentKicks, removeCachedKick } from '../services/kicksCache';
+import { loadKickFrames } from '../services/kickFrames';
+import SkeletonReplay from '../components/SkeletonReplay';
+import type { Landmark } from '../engine/biomech';
 import type { HomeStackParamList, DbKick } from '../types';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'KickHistory'>;
+
+const { width: SCREEN_W } = Dimensions.get('window');
+const PEAK_W = SCREEN_W - spacing.lg * 2 - spacing.md * 2;
+const PEAK_H = PEAK_W * 1.1;
 
 export default function KickHistoryScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const [kicks, setKicks] = useState<DbKick[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  // Cache of peak frames per kickId, fetched on demand when card is expanded.
+  const [peaks, setPeaks] = useState<Record<string, { lm: Landmark[]; leg: 'Left' | 'Right' } | 'loading' | 'missing'>>({});
 
-  useEffect(() => {
-    loadKicks();
+  // Lazily load the peak frame for a kick when its card is expanded.
+  const ensurePeakLoaded = useCallback(async (kickId: string) => {
+    setPeaks(prev => {
+      if (prev[kickId]) return prev; // already loaded or loading
+      return { ...prev, [kickId]: 'loading' };
+    });
+    const data = await loadKickFrames(kickId);
+    setPeaks(prev => {
+      if (!data || !data.frames.length) return { ...prev, [kickId]: 'missing' };
+      const idx = Math.min(Math.max(0, data.peakIdx), data.frames.length - 1);
+      return { ...prev, [kickId]: { lm: data.frames[idx].image, leg: data.leg } };
+    });
   }, []);
 
-  const loadKicks = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) return;
-    const { data } = await getRecentKicks(session.user.id, 100);
-    if (data) setKicks(data);
-  };
+  const handleToggleExpand = useCallback((kickId: string, isExpanded: boolean) => {
+    setExpandedId(isExpanded ? null : kickId);
+    if (!isExpanded) ensurePeakLoaded(kickId);
+  }, [ensurePeakLoaded]);
+
+  // Cache-first: render local immediately, then fetch fresh.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user || cancelled) return;
+      setUserId(session.user.id);
+
+      // 1. Load cached instantly
+      const cached = await readCachedRecentKicks(session.user.id);
+      if (!cancelled && cached.length > 0) setKicks(cached);
+
+      // 2. Fetch fresh in background
+      setRefreshing(true);
+      const { data } = await getRecentKicks(session.user.id, 100);
+      if (cancelled) return;
+      if (data) {
+        setKicks(data);
+        writeCachedRecentKicks(session.user.id, data).catch(() => {});
+      }
+      setRefreshing(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleDelete = useCallback((kick: DbKick) => {
+    Alert.alert(
+      'Delete this kick?',
+      `${kick.kick_type} — ${kick.engine_data.score}/100`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            // Optimistic UI — remove from list immediately
+            setKicks(prev => prev.filter(k => k.id !== kick.id));
+            if (expandedId === kick.id) setExpandedId(null);
+            if (userId) removeCachedKick(userId, kick.id).catch(() => {});
+            const { error } = await deleteKick(kick.id);
+            if (error) {
+              Alert.alert('Delete failed', error.message);
+              // Re-fetch to restore truth if delete failed
+              if (userId) {
+                const { data } = await getRecentKicks(userId, 100);
+                if (data) {
+                  setKicks(data);
+                  writeCachedRecentKicks(userId, data).catch(() => {});
+                }
+              }
+            }
+          },
+        },
+      ],
+    );
+  }, [userId, expandedId]);
 
   // Group kicks by date
   const grouped: Record<string, DbKick[]> = {};
@@ -60,7 +137,10 @@ export default function KickHistoryScreen({ navigation }: Props) {
           <Text style={styles.backBtn}>← Back</Text>
         </TouchableOpacity>
 
-        <Text style={styles.title}>Kick History</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>Kick History</Text>
+          {refreshing && <Text style={styles.refreshLabel}>refreshing…</Text>}
+        </View>
 
         {sortedDays.length === 0 ? (
           <View style={styles.emptyCard}>
@@ -77,10 +157,12 @@ export default function KickHistoryScreen({ navigation }: Props) {
                   <TouchableOpacity
                     key={kick.id}
                     style={styles.kickCard}
-                    onPress={() => setExpandedId(isExpanded ? null : kick.id)}
+                    onPress={() => handleToggleExpand(kick.id, isExpanded)}
+                    onLongPress={() => handleDelete(kick)}
+                    delayLongPress={400}
                     activeOpacity={0.8}>
                     <View style={styles.kickHeader}>
-                      <View>
+                      <View style={{ flex: 1 }}>
                         <Text style={styles.kickType}>{kick.kick_type}</Text>
                         <Text style={styles.kickMeta}>
                           {kick.engine_data.leg} · {formatTime(kick.created_at)}
@@ -93,7 +175,29 @@ export default function KickHistoryScreen({ navigation }: Props) {
 
                     {isExpanded && (
                       <View style={styles.expanded}>
-                        <Text style={styles.expandLabel}>FEEDBACK</Text>
+                        {/* Peak skeleton snapshot */}
+                        <Text style={styles.expandLabel}>PEAK</Text>
+                        <View style={styles.peakBox}>
+                          {(() => {
+                            const p = peaks[kick.id];
+                            if (!p || p === 'loading') {
+                              return <ActivityIndicator color={colors.primary} />;
+                            }
+                            if (p === 'missing') {
+                              return <Text style={styles.peakMissing}>No replay saved</Text>;
+                            }
+                            return (
+                              <SkeletonReplay
+                                landmarks={p.lm}
+                                width={PEAK_W}
+                                height={PEAK_H}
+                                highlightLeg={p.leg}
+                              />
+                            );
+                          })()}
+                        </View>
+
+                        <Text style={[styles.expandLabel, { marginTop: spacing.md }]}>FEEDBACK</Text>
                         {kick.engine_data.feedback.map((f, i) => (
                           <Text key={i} style={styles.feedbackLine}>• {f}</Text>
                         ))}
@@ -108,6 +212,12 @@ export default function KickHistoryScreen({ navigation }: Props) {
                         <Text style={styles.angleText}>
                           Peak Angle: {Math.floor(kick.engine_data.peakAngle)}°
                         </Text>
+                        <TouchableOpacity
+                          style={styles.deleteBtn}
+                          onPress={() => handleDelete(kick)}
+                          activeOpacity={0.7}>
+                          <Text style={styles.deleteBtnText}>DELETE</Text>
+                        </TouchableOpacity>
                       </View>
                     )}
                   </TouchableOpacity>
@@ -130,6 +240,42 @@ const styles = StyleSheet.create({
   backBtn: { fontFamily: fonts.interBold, fontSize: 16, color: colors.primary, marginBottom: spacing.md },
 
   title: { fontFamily: fonts.montserratExtraBold, fontSize: 28, color: colors.textPrimary, marginBottom: spacing.lg },
+
+  titleRow: {
+    flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between',
+    marginBottom: spacing.lg,
+  },
+  refreshLabel: {
+    fontFamily: fonts.interRegular, fontSize: 11, color: colors.textMuted,
+    letterSpacing: 1,
+  },
+
+  deleteBtn: {
+    alignSelf: 'flex-end',
+    marginTop: spacing.md,
+    paddingVertical: spacing.xs, paddingHorizontal: spacing.md,
+    borderWidth: 1, borderColor: colors.error,
+    borderRadius: 4,
+  },
+  deleteBtnText: {
+    fontFamily: fonts.oswaldBold, fontSize: 11, color: colors.error,
+    letterSpacing: 1.5,
+  },
+
+  peakBox: {
+    width: PEAK_W,
+    height: PEAK_H,
+    backgroundColor: '#0a0a0a',
+    borderRadius: 4,
+    borderWidth: 1, borderColor: colors.cardBorder,
+    alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden',
+    alignSelf: 'center',
+    marginTop: 4,
+  },
+  peakMissing: {
+    fontFamily: fonts.interRegular, fontSize: 12, color: colors.textMuted,
+  },
 
   dayHeader: {
     fontFamily: fonts.oswaldBold,

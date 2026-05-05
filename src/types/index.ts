@@ -30,6 +30,16 @@ export interface EngineData {
   leg: 'Left' | 'Right';
   peakAngle: number;
   kickMode: KickMode;
+  /** Optional rich data for fighter-attribute scoring. Older saved kicks may lack these. */
+  passedCriteria?: string[];
+  metrics?: {
+    peakKneeAngularVelDegPerSec?: number;
+    peakFootSpeedMS?: number;
+    extensionMs?: number;
+    chamberMs?: number;
+    totalMs?: number;
+    recoilToExtensionRatio?: number;
+  };
 }
 
 export interface DbKick {
@@ -91,6 +101,7 @@ export type HomeStackParamList = {
   Dashboard: undefined;
   SetGoals: undefined;
   KickHistory: undefined;
+  FighterAttributes: undefined;
 };
 
 export type AnalysisMode = 'Quick' | 'Full';
@@ -98,7 +109,31 @@ export type AnalysisMode = 'Quick' | 'Full';
 export type TrainStackParamList = {
   TrainSelect: undefined;
   Camera: { kickMode: KickMode; analysisMode?: AnalysisMode };
+  KickReview: { kickId: string };
 };
+
+/* ── Kick frame storage (compact, for replay) ── */
+/** Compact landmark: [x, y, z, visibility, presence], rounded to 4 decimals. */
+export type CompactLandmark = [number, number, number, number, number];
+/** A frame stored compactly. */
+export interface CompactFrame {
+  /** image-space landmarks */
+  i: CompactLandmark[];
+  /** world-space landmarks */
+  w: CompactLandmark[];
+  /** relative timestamp ms from kick start */
+  t: number;
+}
+export interface DbKickFrames {
+  id: string;
+  kick_id: string;
+  user_id: string;
+  created_at: string;
+  frames: CompactFrame[];
+  peak_frame_idx: number;
+  chamber_frame_idx: number;
+  leg: 'Left' | 'Right';
+}
 
 export type ProfileStackParamList = {
   Profile: undefined;

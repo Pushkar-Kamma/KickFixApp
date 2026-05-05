@@ -13,6 +13,8 @@ export { default as PasswordUpdatedScreen } from './PasswordUpdatedScreen';
 export { default as ProfileSetupScreen } from './ProfileSetupScreen';
 export { default as SetGoalsScreen } from './SetGoalsScreen';
 export { default as KickHistoryScreen } from './KickHistoryScreen';
+export { default as FighterAttributesScreen } from './FighterAttributesScreen';
 export { default as TrainSelectScreen } from './TrainSelectScreen';
+export { default as KickReviewScreen } from './KickReviewScreen';
 export { default as EditUsernameScreen } from './EditUsernameScreen';
 export { default as EditProfileScreen } from './EditProfileScreen';

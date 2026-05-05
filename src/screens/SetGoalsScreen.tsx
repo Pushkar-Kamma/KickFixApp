@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet, View, Text, TextInput, TouchableOpacity, ScrollView, StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { colors, spacing, borderRadius, fonts } from '../theme';
+import { supabase } from '../lib/supabase';
+import { readGoals, writeGoals } from '../services/goals';
 import type { HomeStackParamList } from '../types';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'SetGoals'>;
@@ -15,11 +17,33 @@ export default function SetGoalsScreen({ navigation }: Props) {
   const [timeGoal, setTimeGoal] = useState('');
   const [scoreGoal, setScoreGoal] = useState('');
   const [saved, setSaved] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
 
-  const handleSave = () => {
-    // Goals stored locally for MVP — will move to Supabase later
+  // Load existing goals on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user || cancelled) return;
+      setUserId(session.user.id);
+      const goals = await readGoals(session.user.id);
+      if (cancelled) return;
+      if (goals.dailyKicks) setKicksGoal(String(goals.dailyKicks));
+      if (goals.dailyMinutes) setTimeGoal(String(goals.dailyMinutes));
+      if (goals.avgScoreTarget) setScoreGoal(String(goals.avgScoreTarget));
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleSave = async () => {
+    if (!userId) return;
+    await writeGoals(userId, {
+      dailyKicks: kicksGoal ? parseInt(kicksGoal, 10) : undefined,
+      dailyMinutes: timeGoal ? parseInt(timeGoal, 10) : undefined,
+      avgScoreTarget: scoreGoal ? parseInt(scoreGoal, 10) : undefined,
+    });
     setSaved(true);
-    setTimeout(() => navigation.goBack(), 1200);
+    setTimeout(() => navigation.goBack(), 1000);
   };
 
   return (

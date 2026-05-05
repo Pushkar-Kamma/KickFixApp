@@ -10,10 +10,18 @@ import { supabase } from '../lib/supabase';
 import { getSessionStats, getRecentSessions } from '../services/sessions';
 import { getRecentKicks } from '../services/kicks';
 import { getProfile } from '../services/profiles';
+import { getDailyProgress, getStreak, readGoals, maybeAdvanceStreak, type DailyProgress, type StreakState, type UserGoals } from '../services/goals';
+import { getFighterAttributes, type FighterAttributes } from '../services/attributes';
+import AttributeRadar from '../components/AttributeRadar';
 import type { HomeStackParamList, DbKick } from '../types';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'Dashboard'>;
 const { width: SCREEN_W } = Dimensions.get('window');
+
+/* Heatmap cell sizing — sized so 12 weeks fit comfortably with a small day-label column */
+const HM_DAY_LABEL_W = 12;
+const HM_GAP = 3;
+const HM_CELL = Math.floor((SCREEN_W - 32 /* horizontal padding */ - 32 /* card padding */ - HM_DAY_LABEL_W - HM_GAP * 11) / 12);
 
 /* ── Geometric SVG-style icons (rendered as Text with custom shapes) ── */
 // Sharp lightning bolt: two parallelograms forming a Z-bolt
@@ -139,6 +147,149 @@ function HeavyBagIcon({ size = 60 }: { size?: number }) {
   );
 }
 
+/* ── Goals card ── */
+function GoalsCard({
+  goals, progress, streak, onPressSet,
+}: {
+  goals: UserGoals;
+  progress: DailyProgress | null;
+  streak: StreakState;
+  onPressSet: () => void;
+}) {
+  // Empty state — user hasn't set any goals yet
+  if (!progress || !progress.hasAnyGoal) {
+    return (
+      <TouchableOpacity style={goalStyles.emptyCard} onPress={onPressSet} activeOpacity={0.85}>
+        <Text style={goalStyles.emptyTitle}>SET YOUR DAILY GOALS</Text>
+        <Text style={goalStyles.emptyBody}>
+          Track kicks, time and score targets to keep yourself sharp.
+        </Text>
+        <Text style={goalStyles.emptyCta}>SET GOALS  →</Text>
+      </TouchableOpacity>
+    );
+  }
+  return (
+    <TouchableOpacity style={goalStyles.card} onPress={onPressSet} activeOpacity={0.9}>
+      <View style={goalStyles.headerRow}>
+        <Text style={goalStyles.headerTitle}>TODAY'S GOALS</Text>
+        {streak.current > 0 && (
+          <Text style={goalStyles.streakText}>🔥 {streak.current} day streak</Text>
+        )}
+      </View>
+      {goals.dailyKicks !== undefined && (
+        <GoalRow
+          label="KICKS"
+          current={progress.kicksToday}
+          target={goals.dailyKicks}
+          unit=""
+          met={progress.goalKicksMet}
+        />
+      )}
+      {goals.dailyMinutes !== undefined && (
+        <GoalRow
+          label="TIME"
+          current={progress.minutesToday}
+          target={goals.dailyMinutes}
+          unit=" min"
+          met={progress.goalMinutesMet}
+        />
+      )}
+      {goals.avgScoreTarget !== undefined && (
+        <GoalRow
+          label="AVG SCORE"
+          current={progress.avgScoreToday ?? 0}
+          target={goals.avgScoreTarget}
+          unit=""
+          met={progress.goalScoreMet}
+        />
+      )}
+    </TouchableOpacity>
+  );
+}
+
+function GoalRow({ label, current, target, unit, met }: {
+  label: string; current: number; target: number; unit: string; met: boolean;
+}) {
+  const pct = target > 0 ? Math.min(100, (current / target) * 100) : 0;
+  return (
+    <View style={goalStyles.goalRow}>
+      <View style={goalStyles.goalRowHeader}>
+        <Text style={goalStyles.goalLabel}>{label}</Text>
+        <Text style={[goalStyles.goalValue, met && { color: colors.accent }]}>
+          {current} / {target}{unit}
+        </Text>
+      </View>
+      <View style={goalStyles.barTrack}>
+        <View style={[
+          goalStyles.barFill,
+          { width: `${pct}%`, backgroundColor: met ? colors.accent : colors.primary },
+        ]} />
+      </View>
+    </View>
+  );
+}
+
+const goalStyles = StyleSheet.create({
+  card: {
+    backgroundColor: '#2A2424',
+    borderWidth: 1, borderColor: '#222222',
+    borderRadius: 4,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  emptyCard: {
+    backgroundColor: '#161111',
+    borderWidth: 1, borderColor: colors.primary + '55',
+    borderRadius: 4,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+    alignItems: 'flex-start',
+  },
+  emptyTitle: {
+    fontFamily: fonts.oswaldBold, fontSize: 14, color: colors.white,
+    letterSpacing: 1.5,
+  },
+  emptyBody: {
+    fontFamily: fonts.interRegular, fontSize: 13, color: colors.textSecondary,
+    marginTop: 6, marginBottom: spacing.sm, lineHeight: 18,
+  },
+  emptyCta: {
+    fontFamily: fonts.montserratBold, fontSize: 12, color: colors.primary,
+    letterSpacing: 1.5,
+  },
+  headerRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: spacing.xs,
+  },
+  headerTitle: {
+    fontFamily: fonts.oswaldBold, fontSize: 13, color: colors.textMuted,
+    letterSpacing: 1.5,
+  },
+  streakText: {
+    fontFamily: fonts.montserratBold, fontSize: 12, color: colors.white,
+  },
+  goalRow: {
+    marginTop: spacing.sm,
+  },
+  goalRowHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline',
+    marginBottom: 4,
+  },
+  goalLabel: {
+    fontFamily: fonts.oswaldRegular, fontSize: 11, color: colors.textMuted,
+    letterSpacing: 1.2,
+  },
+  goalValue: {
+    fontFamily: fonts.montserratBold, fontSize: 13, color: colors.white,
+  },
+  barTrack: {
+    height: 6, backgroundColor: '#1a1414', borderRadius: 3, overflow: 'hidden',
+  },
+  barFill: {
+    height: '100%', borderRadius: 3,
+  },
+});
+
 export default function DashboardScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
@@ -146,6 +297,11 @@ export default function DashboardScreen({ navigation }: Props) {
   const [stats, setStats] = useState({ totalKicks: 0, goodKicks: 0, badKicks: 0, bestStreak: 0, sessionCount: 0 });
   const [recentKicks, setRecentKicks] = useState<DbKick[]>([]);
   const [heatmap, setHeatmap] = useState<Record<string, number>>({});
+  const [progress, setProgress] = useState<DailyProgress | null>(null);
+  const [streak, setStreak] = useState<StreakState>({ current: 0, longest: 0, lastMetDate: '' });
+  const [goals, setGoals] = useState<UserGoals>({});
+  const [heatTip, setHeatTip] = useState<{ date: string; count: number } | null>(null);
+  const [attrs, setAttrs] = useState<FighterAttributes | null>(null);
 
   const loadData = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -170,6 +326,19 @@ export default function DashboardScreen({ navigation }: Props) {
       }
       setHeatmap(map);
     }
+
+    // Goals + streak
+    const dp = await getDailyProgress(uid);
+    setProgress(dp);
+    // Advance streak if today's goals are now met
+    const st = await maybeAdvanceStreak(uid, dp);
+    setStreak(st);
+    const g = await readGoals(uid);
+    setGoals(g);
+
+    // Fighter attributes (30d)
+    const a = await getFighterAttributes(uid, '30d');
+    setAttrs(a);
   }, []);
 
   useEffect(() => {
@@ -180,22 +349,61 @@ export default function DashboardScreen({ navigation }: Props) {
     ? Math.round((stats.goodKicks / stats.totalKicks) * 100)
     : 0;
 
-  // Last 35 days for heatmap
+  // 12 weeks (84 days) for heatmap. Build columns: each is a Sun→Sat week.
+  // Last column ends with today.
   const today = new Date();
-  const days: string[] = [];
-  for (let i = 34; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    days.push(d.toISOString().slice(0, 10));
+  today.setHours(0, 0, 0, 0);
+  const todayKey = today.toISOString().slice(0, 10);
+  const dayOfWeek = today.getDay(); // 0 = Sun
+  // Total cells = 12 weeks * 7 + (days into current week)
+  const WEEKS = 12;
+  const heatmapDays: string[] = [];
+  // Start at the Sunday WEEKS-1 weeks before the Sunday of this week
+  const startSunday = new Date(today);
+  startSunday.setDate(today.getDate() - dayOfWeek - (WEEKS - 1) * 7);
+  for (let w = 0; w < WEEKS; w++) {
+    for (let d = 0; d < 7; d++) {
+      const dt = new Date(startSunday);
+      dt.setDate(startSunday.getDate() + w * 7 + d);
+      heatmapDays.push(dt.toISOString().slice(0, 10));
+    }
   }
 
-  const getHeatColor = (count: number) => {
-    if (count === 0) return colors.card;
-    if (count < 5) return 'rgba(211, 47, 47, 0.20)';
-    if (count < 15) return 'rgba(211, 47, 47, 0.45)';
-    if (count < 30) return 'rgba(211, 47, 47, 0.70)';
+  // Personalized color buckets: based on the user's median non-zero day.
+  const dayCounts = heatmapDays.map(d => heatmap[d] || 0);
+  const nonZero = dayCounts.filter(c => c > 0).sort((a, b) => a - b);
+  const median = nonZero.length
+    ? nonZero[Math.floor(nonZero.length / 2)]
+    : 0;
+
+  const getHeatColor = (count: number, dateKey: string) => {
+    // Future days = transparent (haven't happened yet)
+    if (dateKey > todayKey) return 'transparent';
+    if (count === 0) return '#1a1414'; // "empty but tracked" — dark grey
+    if (median === 0) return colors.primary; // first kick ever
+    const ratio = count / median;
+    if (ratio < 0.25) return 'rgba(211, 47, 47, 0.20)';
+    if (ratio < 0.75) return 'rgba(211, 47, 47, 0.45)';
+    if (ratio < 1.25) return 'rgba(211, 47, 47, 0.75)';
     return colors.primary;
   };
+
+  // Heatmap summary stats
+  const totalKicks12w = dayCounts.reduce((s, c) => s + c, 0);
+  const bestDay = dayCounts.reduce((m, c) => Math.max(m, c), 0);
+  const activeDays = nonZero.length;
+
+  // Month labels: show month name above each column where the month changes
+  const monthLabels: { col: number; label: string }[] = [];
+  let prevMonth = -1;
+  for (let w = 0; w < WEEKS; w++) {
+    const firstDay = heatmapDays[w * 7];
+    const m = new Date(firstDay).getMonth();
+    if (m !== prevMonth) {
+      monthLabels.push({ col: w, label: new Date(firstDay).toLocaleDateString('en-US', { month: 'short' }) });
+      prevMonth = m;
+    }
+  }
 
   const scoreColor = (score: number) =>
     score >= 80 ? colors.white : score >= 50 ? colors.textSecondary : colors.primary;
@@ -211,6 +419,15 @@ export default function DashboardScreen({ navigation }: Props) {
 
         {/* Header */}
         <Text style={styles.greeting}>Hey {username || 'Fighter'},</Text>
+
+        {/* Goals Card */}
+        <GoalsCard
+          goals={goals}
+          progress={progress}
+          streak={streak}
+          onPressSet={() => navigation.navigate('SetGoals')}
+        />
+
         <Text style={styles.subtitle}>Your Stats</Text>
 
         {/* Stat Cards */}
@@ -233,18 +450,76 @@ export default function DashboardScreen({ navigation }: Props) {
         <Text style={styles.sectionTitle}>Practice Activity</Text>
         {hasData ? (
           <View style={styles.heatmapCard}>
-            <View style={styles.heatmapGrid}>
-              {days.map(day => (
-                <View
-                  key={day}
-                  style={[styles.heatCell, { backgroundColor: getHeatColor(heatmap[day] || 0) }]}
-                />
-              ))}
+            {/* Summary line */}
+            <Text style={styles.heatSummary}>
+              {totalKicks12w} kicks · {activeDays} active days · best {bestDay}
+            </Text>
+
+            {/* Month labels row */}
+            <View style={styles.monthRow}>
+              <View style={{ width: HM_DAY_LABEL_W }} />
+              {Array.from({ length: WEEKS }).map((_, w) => {
+                const lbl = monthLabels.find(m => m.col === w);
+                return (
+                  <View key={w} style={{ width: HM_CELL + HM_GAP, alignItems: 'flex-start' }}>
+                    {lbl ? <Text style={styles.monthLabel}>{lbl.label}</Text> : null}
+                  </View>
+                );
+              })}
             </View>
+
+            {/* Grid: 7 rows × 12 cols, with day labels on left */}
+            <View style={styles.heatBody}>
+              <View style={styles.dayLabelCol}>
+                {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+                  <Text key={i} style={[styles.dayLabel, i % 2 === 1 ? null : { opacity: 0 }]}>{d}</Text>
+                ))}
+              </View>
+              <View style={styles.heatGrid}>
+                {Array.from({ length: WEEKS }).map((_, w) => (
+                  <View key={w} style={styles.heatCol}>
+                    {Array.from({ length: 7 }).map((__, d) => {
+                      const dateKey = heatmapDays[w * 7 + d];
+                      const count = heatmap[dateKey] || 0;
+                      const isToday = dateKey === todayKey;
+                      const isFuture = dateKey > todayKey;
+                      return (
+                        <TouchableOpacity
+                          key={d}
+                          activeOpacity={0.6}
+                          disabled={isFuture}
+                          onPress={() => setHeatTip({ date: dateKey, count })}
+                          style={[
+                            styles.heatCell,
+                            { backgroundColor: getHeatColor(count, dateKey) },
+                            isToday && styles.heatCellToday,
+                            isFuture && { borderWidth: 0 },
+                          ]}
+                        />
+                      );
+                    })}
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            {/* Tooltip */}
+            {heatTip && (
+              <View style={styles.heatTip}>
+                <Text style={styles.heatTipDate}>
+                  {new Date(heatTip.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                </Text>
+                <Text style={styles.heatTipCount}>
+                  {heatTip.count === 0 ? 'No kicks' : `${heatTip.count} kick${heatTip.count === 1 ? '' : 's'}`}
+                </Text>
+              </View>
+            )}
+
+            {/* Legend */}
             <View style={styles.heatLegend}>
               <Text style={styles.heatLegendText}>Less</Text>
-              {[0, 3, 10, 20, 40].map(v => (
-                <View key={v} style={[styles.heatCell, { backgroundColor: getHeatColor(v) }]} />
+              {['#1a1414', 'rgba(211, 47, 47, 0.20)', 'rgba(211, 47, 47, 0.45)', 'rgba(211, 47, 47, 0.75)', colors.primary].map((bg, i) => (
+                <View key={i} style={[styles.heatCell, { backgroundColor: bg }]} />
               ))}
               <Text style={styles.heatLegendText}>More</Text>
             </View>
@@ -282,6 +557,37 @@ export default function DashboardScreen({ navigation }: Props) {
         </View>
 
         {/* Recent Kicks */}
+        {attrs && attrs.hasEnoughData && (
+          <TouchableOpacity
+            style={styles.attrCard}
+            onPress={() => navigation.navigate('FighterAttributes')}
+            activeOpacity={0.85}>
+            <View style={styles.attrLeft}>
+              <AttributeRadar
+                size={120}
+                overall={null}
+                showLabels={false}
+                axes={[
+                  { label: 'TECHNIQUE', value: attrs.technique },
+                  { label: 'POWER', value: attrs.power },
+                  { label: 'SPEED', value: attrs.speed },
+                  { label: 'DEFENSE', value: attrs.defense },
+                  { label: 'FOOTWORK', value: attrs.footwork },
+                  { label: 'CONDITIONING', value: attrs.conditioning },
+                ]}
+              />
+            </View>
+            <View style={styles.attrRight}>
+              <Text style={styles.attrEyebrow}>FIGHTER</Text>
+              <Text style={styles.attrOverall}>{attrs.overall}</Text>
+              <Text style={styles.attrTier}>
+                {attrs.overall >= 90 ? 'ELITE' : attrs.overall >= 75 ? 'ADVANCED' : attrs.overall >= 55 ? 'INTERMEDIATE' : 'NOVICE'}
+              </Text>
+              <Text style={styles.attrCta}>VIEW STATS →</Text>
+            </View>
+          </TouchableOpacity>
+        )}
+
         <Text style={styles.sectionTitle}>Recent Kicks</Text>
         {recentKicks.length === 0 ? (
           <View style={styles.emptyState}>
@@ -387,17 +693,114 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
 
-  /* ── Heatmap ── */
+  /* ── Heatmap (12-week grid) ── */
   heatmapCard: {
     backgroundColor: '#161111',
     borderRadius: borderRadius.md,
     padding: spacing.md,
     marginBottom: spacing.lg,
   },
-  heatmapGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
-  heatCell: { width: 16, height: 16, borderRadius: 3 },
+  heatSummary: {
+    fontFamily: fonts.interMedium,
+    fontSize: 12,
+    color: colors.textMuted,
+    marginBottom: spacing.sm,
+  },
+  monthRow: {
+    flexDirection: 'row',
+    marginBottom: 4,
+  },
+  monthLabel: {
+    fontFamily: fonts.interRegular,
+    fontSize: 9,
+    color: colors.textMuted,
+    letterSpacing: 0.5,
+  },
+  heatBody: {
+    flexDirection: 'row',
+  },
+  dayLabelCol: {
+    width: HM_DAY_LABEL_W,
+    justifyContent: 'space-between',
+    paddingTop: 1,
+    paddingBottom: 1,
+  },
+  dayLabel: {
+    fontFamily: fonts.interRegular,
+    fontSize: 9,
+    color: colors.textMuted,
+    height: HM_CELL,
+    lineHeight: HM_CELL,
+  },
+  heatGrid: {
+    flexDirection: 'row',
+  },
+  heatCol: {
+    marginRight: HM_GAP,
+    justifyContent: 'space-between',
+  },
+  heatCell: {
+    width: HM_CELL,
+    height: HM_CELL,
+    borderRadius: 3,
+    marginBottom: HM_GAP,
+  },
+  heatCellToday: {
+    borderWidth: 1.5,
+    borderColor: colors.white,
+  },
+  heatTip: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    backgroundColor: '#0a0a0a',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+  },
+  heatTipDate: {
+    fontFamily: fonts.oswaldBold,
+    fontSize: 11,
+    color: colors.white,
+    letterSpacing: 1,
+  },
+  heatTipCount: {
+    fontFamily: fonts.interMedium,
+    fontSize: 11,
+    color: colors.textSecondary,
+  },
   heatLegend: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: spacing.sm, justifyContent: 'flex-end' },
   heatLegendText: { fontFamily: fonts.interRegular, fontSize: 10, color: colors.textMuted },
+
+  /* ── Fighter Attributes preview ── */
+  attrCard: {
+    flexDirection: 'row',
+    backgroundColor: '#161111',
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+    alignItems: 'center',
+  },
+  attrLeft: { width: 120, height: 120 },
+  attrRight: { flex: 1, paddingLeft: spacing.md, justifyContent: 'center' },
+  attrEyebrow: {
+    fontFamily: fonts.oswaldRegular, fontSize: 11,
+    color: colors.textMuted, letterSpacing: 1.5,
+  },
+  attrOverall: {
+    fontFamily: fonts.montserratBlack, fontSize: 48, color: colors.white,
+    lineHeight: 52, includeFontPadding: false, marginVertical: 2,
+  },
+  attrTier: {
+    fontFamily: fonts.oswaldBold, fontSize: 13, color: colors.primary,
+    letterSpacing: 1.8, marginBottom: spacing.xs,
+  },
+  attrCta: {
+    fontFamily: fonts.montserratBold, fontSize: 11, color: colors.primary,
+    letterSpacing: 1.5,
+  },
 
   /* ── Empty States ── */
   emptyState: {
