@@ -24,8 +24,10 @@ import { createSession, endSession } from '../services/sessions';
 import { saveKick } from '../services/kicks';
 import { saveKickFrames } from '../services/kickFrames';
 import { getDailyProgress, maybeAdvanceStreak } from '../services/goals';
-import { setPendingKick } from '../engine/pendingKick';
-import { J, frameUsable, detectKickingLeg, type Landmark, type PoseFrame } from '../engine/biomech';
+import { setPendingKick, reconcilePendingKick } from '../engine/pendingKick';
+import { bumpTelemetry } from '../services/telemetry';
+import { queueKickSave, flushKicksWAL } from '../services/kicksWAL';
+import { J, frameUsable, detectKickingLeg, angle3D, lmReq, type Landmark, type PoseFrame, type MediaPipePayload } from '../engine/biomech';
 import { analyzeFrontSnap } from '../engine/FrontSnapAnalyzer';
 import { analyzeSideKick } from '../engine/SideKickAnalyzer';
 import { analyzeRoundhouse } from '../engine/RoundhouseAnalyzer';
@@ -37,10 +39,19 @@ type Props = NativeStackScreenProps<TrainStackParamList, 'Camera'>;
 
 type Phase = 'IDLE' | 'RECORDING' | 'COOLDOWN';
 
-const PRE_ROLL = 5;          // frames captured before kick starts (chamber prep)
-const MIN_KICK_FRAMES = 8;   // ignore noise
-const COOLDOWN_FRAMES = 6;   // require N idle frames before next kick
-const KNEE_VEL_ONSET = 0.06; // image-space delta-Y per frame to trigger (≈ knee rising fast)
+// Detection thresholds — frame-rate INDEPENDENT (use elapsed time, not frame deltas).
+// See THRESHOLDS.md for rationale.
+const PRE_ROLL = 5;                // frames captured before kick starts (chamber prep)
+const MIN_KICK_FRAMES = 8;         // ignore noise
+const COOLDOWN_FRAMES = 6;         // require N idle frames before next kick
+/** Min knee angular velocity (deg/s) to trigger RECORDING. World-space, not image. */
+const ONSET_KNEE_VEL_DEG_S = 250;
+/** Min knee angle (deg) at peak before we'll consider "end of kick". */
+const END_PEAK_THRESHOLD_DEG = 130;
+/** Knee angle (deg) below which we consider the leg back in chamber position. */
+const END_RECHAMBER_THRESHOLD_DEG = 110;
+/** Hard safety cap on buffer length (~2s at 30fps). */
+const MAX_KICK_FRAMES = 60;
 
 export default function CameraScreen({ route, navigation }: Props) {
   const kickMode: KickMode = route.params?.kickMode ?? 'Front Snap';
@@ -62,7 +73,14 @@ export default function CameraScreen({ route, navigation }: Props) {
   const phaseRef = useRef<Phase>('IDLE');
   const buffer = useRef<PoseFrame[]>([]);
   const preRoll = useRef<PoseFrame[]>([]);
-  const lastKneeY = useRef<{ left: number; right: number }>({ left: 0.5, right: 0.5 });
+  // Per-leg knee angle history for frame-rate-independent angular velocity detection.
+  // Each entry: { angle in deg, t in ms }. Only last 2 needed; using object for clarity.
+  const lastKneeSample = useRef<{ left: { a: number; t: number } | null; right: { a: number; t: number } | null }>({
+    left: null,
+    right: null,
+  });
+  // Peak knee angle during the current RECORDING window (used for end detection).
+  const recordingPeakAngle = useRef(0);
   const cooldownLeft = useRef(0);
   const sessionId = useRef<string | null>(null);
   const userId = useRef<string | null>(null);
@@ -78,6 +96,15 @@ export default function CameraScreen({ route, navigation }: Props) {
   const fpsLast = useRef(Date.now());
   const [fps, setFps] = useState(0);
 
+  // Centralized notice timeout — cleared on unmount to prevent setState-on-unmount
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashNotice = useCallback((msg: string, ms = 2500) => {
+    setNotice(msg);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(''), ms);
+  }, []);
+
   /* ── Permission + session lifecycle ── */
   useEffect(() => {
     requestCameraPermission().then(setHasPermission);
@@ -89,6 +116,8 @@ export default function CameraScreen({ route, navigation }: Props) {
         const { data } = await createSession(session.user.id, kickMode);
         if (data) sessionId.current = data.id;
       }
+      // Best-effort: drain any queued offline kicks now that we're (probably) online.
+      flushKicksWAL().catch(() => {});
     })();
 
     return () => {
@@ -100,6 +129,8 @@ export default function CameraScreen({ route, navigation }: Props) {
           max_streak: maxStreak.current,
         }).catch(() => {});
       }
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+      if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -107,9 +138,8 @@ export default function CameraScreen({ route, navigation }: Props) {
   /* ── Process one analyzed kick ── */
   const finalizeKick = useCallback((frames: PoseFrame[]) => {
     if (frames.length < MIN_KICK_FRAMES) {
-      // Don't overwrite previous kick's score/verdict/cue — just flash a small notice
-      setNotice(`Ignored — only ${frames.length} frames captured.`);
-      setTimeout(() => setNotice(''), 2500);
+      bumpTelemetry(userId.current, 'tooShortKicks').catch(() => {});
+      flashNotice(`Ignored — only ${frames.length} frames captured.`);
       return;
     }
     const leg = detectKickingLeg(frames.map(f => f.image)) ?? 'Right';
@@ -128,11 +158,12 @@ export default function CameraScreen({ route, navigation }: Props) {
       }
 
       // Discard likely false positives — kicks scoring below 45 are usually
-      // detection noise (waved leg, partial kick, lost tracking mid-motion).
-      // Don't increment counters, don't persist, just flash a notice.
+      // detection noise. Don't increment counters or persist, but DO log
+      // to local telemetry so we can later evaluate whether the threshold
+      // is too aggressive (rejected real kicks) or too loose (passed noise).
       if (result.score < 45) {
-        setNotice(`Ignored — low quality kick (${result.score}/100).`);
-        setTimeout(() => setNotice(''), 2500);
+        bumpTelemetry(userId.current, 'rejectedKicks').catch(() => {});
+        flashNotice(`Ignored — low quality kick (${result.score}/100).`);
         return;
       }
 
@@ -193,29 +224,52 @@ export default function CameraScreen({ route, navigation }: Props) {
       }
 
       if (userId.current && sessionId.current) {
-        saveKick(userId.current, sessionId.current, kickMode, engineData)
-          .then(({ data }) => {
-            if (!data) return;
+        const uid = userId.current;
+        const sid = sessionId.current;
+        saveKick(uid, sid, kickMode, engineData)
+          .then(({ data, error }) => {
+            if (error || !data) {
+              // Surface failure + queue for offline retry.
+              bumpTelemetry(uid, 'saveFailures').catch(() => {});
+              queueKickSave({
+                tempId: tempKey, userId: uid, sessionId: sid,
+                kickType: kickMode, engineData,
+              }).catch(() => {});
+              flashNotice('Saved locally — will sync when online.');
+              return;
+            }
+            bumpTelemetry(uid, 'savedKicks').catch(() => {});
+            // Reconcile bridge: copy entry under the real id so review
+            // works even if user reopens it later from history.
+            reconcilePendingKick(tempKey, data.id);
             saveKickFrames({
               kickId: data.id,
-              userId: userId.current!,
+              userId: uid,
               frames,
               peakIdx: result.peakFrameIdx,
               chamberIdx: result.chamberFrameIdx,
               leg,
             });
             // Streak: best-effort — if today's goals are now met, advance.
-            getDailyProgress(userId.current!)
-              .then(dp => maybeAdvanceStreak(userId.current!, dp))
+            getDailyProgress(uid)
+              .then(dp => maybeAdvanceStreak(uid, dp))
               .catch(() => {});
           })
-          .catch(e => console.warn('[CameraScreen] saveKick failed:', e));
+          .catch(e => {
+            console.warn('[CameraScreen] saveKick failed:', e);
+            bumpTelemetry(uid, 'saveFailures').catch(() => {});
+            queueKickSave({
+              tempId: tempKey, userId: uid, sessionId: sid,
+              kickType: kickMode, engineData,
+            }).catch(() => {});
+            flashNotice('Saved locally — will sync when online.');
+          });
       }
     });
-  }, [kickMode, analysisMode, navigation]);
+  }, [kickMode, analysisMode, navigation, flashNotice]);
 
   /* ── Landmark callback (per frame) ── */
-  const handleLandmarks = useCallback((data: any) => {
+  const handleLandmarks = useCallback((data: unknown) => {
     if (isPausedRef.current) return;
 
     fpsCount.current += 1;
@@ -226,9 +280,11 @@ export default function CameraScreen({ route, navigation }: Props) {
       fpsLast.current = now;
     }
 
-    let parsed: any;
+    let parsed: MediaPipePayload;
     try {
-      parsed = typeof data === 'string' ? JSON.parse(data) : data;
+      parsed = typeof data === 'string'
+        ? (JSON.parse(data) as MediaPipePayload)
+        : (data as MediaPipePayload);
     } catch { return; }
 
     const image: Landmark[] = parsed?.landmarks ?? [];
@@ -241,9 +297,9 @@ export default function CameraScreen({ route, navigation }: Props) {
         phaseRef.current = 'IDLE';
         setPhase('IDLE');
         buffer.current = [];
-        // Don't overwrite the previous kick's score/cue — just flash a notice
-        setNotice('Lost tracking — kick aborted.');
-        setTimeout(() => setNotice(''), 2500);
+        recordingPeakAngle.current = 0;
+        bumpTelemetry(userId.current, 'abortedKicks').catch(() => {});
+        flashNotice('Lost tracking — kick aborted.');
       }
       return;
     }
@@ -253,15 +309,34 @@ export default function CameraScreen({ route, navigation }: Props) {
     preRoll.current.push(frame);
     if (preRoll.current.length > PRE_ROLL) preRoll.current.shift();
 
-    const lKneeY = image[J.L_KNEE].y;
-    const rKneeY = image[J.R_KNEE].y;
-    const lDelta = lastKneeY.current.left - lKneeY;
-    const rDelta = lastKneeY.current.right - rKneeY;
-    lastKneeY.current = { left: lKneeY, right: rKneeY };
-    const maxRise = Math.max(lDelta, rDelta);
+    // Knee angles in WORLD coords (rotation+scale invariant).
+    const lAngle = angle3D(
+      lmReq(world, J.L_HIP), lmReq(world, J.L_KNEE), lmReq(world, J.L_ANKLE),
+    );
+    const rAngle = angle3D(
+      lmReq(world, J.R_HIP), lmReq(world, J.R_KNEE), lmReq(world, J.R_ANKLE),
+    );
 
+    // Angular velocity (deg/sec) per leg — frame-rate independent.
+    let lVel = 0;
+    let rVel = 0;
+    const prevL = lastKneeSample.current.left;
+    const prevR = lastKneeSample.current.right;
+    if (prevL) {
+      const dt = (now - prevL.t) / 1000;
+      if (dt > 0) lVel = Math.abs(lAngle - prevL.a) / dt;
+    }
+    if (prevR) {
+      const dt = (now - prevR.t) / 1000;
+      if (dt > 0) rVel = Math.abs(rAngle - prevR.a) / dt;
+    }
+    lastKneeSample.current.left = { a: lAngle, t: now };
+    lastKneeSample.current.right = { a: rAngle, t: now };
+    const maxAngVel = Math.max(lVel, rVel);
+
+    // Standing test (sanity — hips above knees in image space, true for almost any upright pose).
     const hipY = (image[J.L_HIP].y + image[J.R_HIP].y) / 2;
-    const kneeY = (lKneeY + rKneeY) / 2;
+    const kneeY = (image[J.L_KNEE].y + image[J.R_KNEE].y) / 2;
     const isStanding = hipY < kneeY;
 
     if (cooldownLeft.current > 0) {
@@ -270,28 +345,38 @@ export default function CameraScreen({ route, navigation }: Props) {
     }
 
     if (phaseRef.current === 'IDLE') {
-      if (isStanding && maxRise > KNEE_VEL_ONSET) {
+      // Onset: a knee is rotating fast while standing.
+      if (isStanding && maxAngVel > ONSET_KNEE_VEL_DEG_S) {
         phaseRef.current = 'RECORDING';
         setPhase('RECORDING');
         buffer.current = [...preRoll.current];
+        recordingPeakAngle.current = Math.max(lAngle, rAngle);
         setHeadlineCue('Recording...');
       }
     } else if (phaseRef.current === 'RECORDING') {
       buffer.current.push(frame);
 
-      const lAnkleY = image[J.L_ANKLE].y;
-      const rAnkleY = image[J.R_ANKLE].y;
-      const ankleNearGround = Math.min(lAnkleY, rAnkleY) > hipY + 0.15;
-      const tooLong = buffer.current.length > 60;
+      // Track peak knee angle so far in this kick.
+      const curPeak = Math.max(lAngle, rAngle);
+      if (curPeak > recordingPeakAngle.current) recordingPeakAngle.current = curPeak;
 
-      if ((ankleNearGround && buffer.current.length > MIN_KICK_FRAMES) || tooLong) {
+      // End condition: we passed peak extension AND the kicking leg has
+      // returned toward chamber (lower knee angle). Fully rotation-invariant.
+      const reachedExtension = recordingPeakAngle.current > END_PEAK_THRESHOLD_DEG;
+      const minCurAngle = Math.min(lAngle, rAngle);
+      const reChambered = reachedExtension && minCurAngle < END_RECHAMBER_THRESHOLD_DEG;
+      const tooLong = buffer.current.length > MAX_KICK_FRAMES;
+
+      if ((reChambered && buffer.current.length > MIN_KICK_FRAMES) || tooLong) {
         const captured = buffer.current;
         buffer.current = [];
+        recordingPeakAngle.current = 0;
         phaseRef.current = 'COOLDOWN';
         setPhase('COOLDOWN');
         cooldownLeft.current = COOLDOWN_FRAMES;
         finalizeKick(captured);
-        setTimeout(() => {
+        if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
+        cooldownTimer.current = setTimeout(() => {
           if (phaseRef.current === 'COOLDOWN') {
             phaseRef.current = 'IDLE';
             setPhase('IDLE');
@@ -308,6 +393,8 @@ export default function CameraScreen({ route, navigation }: Props) {
       phaseRef.current = 'IDLE';
       setPhase('IDLE');
       buffer.current = [];
+      recordingPeakAngle.current = 0;
+      lastKneeSample.current = { left: null, right: null };
     });
     return unsub;
   }, [navigation]);

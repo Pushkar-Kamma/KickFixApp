@@ -40,6 +40,18 @@ export interface PoseFrame {
   t: number;
 }
 
+/**
+ * Shape of the JSON payload emitted by `@thinksys/react-native-mediapipe`'s
+ * `onLandmark` callback. The native side serializes a Java map to JSON;
+ * this is the deserialized form. All fields may be missing if MediaPipe
+ * failed to detect a pose, so call sites must defensively check lengths.
+ */
+export interface MediaPipePayload {
+  landmarks?: Landmark[];        // 33 image-space landmarks
+  worldLandmarks?: Landmark[];   // 33 world-space landmarks (meters from hip mid)
+  additionalData?: { width: number; height: number };
+}
+
 export type Vec3 = { x: number; y: number; z: number };
 
 /* ── Vector math ── */
@@ -68,8 +80,16 @@ export function lm(frame: Landmark[], idx: number): Vec3 | null {
   if (!p) return null;
   return { x: p.x, y: p.y, z: p.z };
 }
+/**
+ * Strict landmark fetch. Throws if the index is missing — callers MUST gate
+ * with `frameUsable()` first to avoid this. The throw is intentional: it
+ * surfaces ghost frames as crashes during development rather than silent NaN.
+ */
 export function lmReq(frame: Landmark[], idx: number): Vec3 {
   const p = frame[idx];
+  if (!p) {
+    throw new Error(`[biomech] lmReq: missing landmark at index ${idx}`);
+  }
   return { x: p.x, y: p.y, z: p.z };
 }
 

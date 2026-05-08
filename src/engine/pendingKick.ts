@@ -42,3 +42,15 @@ export function takePendingKick(key: string): PendingKick | null {
 export function peekPendingKick(key: string): PendingKick | null {
   return store.get(key) ?? null;
 }
+
+/**
+ * After Supabase save resolves, copy a temp-key entry under the real DB id
+ * so subsequent reads (e.g. user opening the same kick from history) can find it.
+ * Both the temp and real-id entries remain valid until consumed or expired.
+ */
+export function reconcilePendingKick(tempKey: string, realKey: string): void {
+  if (tempKey === realKey) return;
+  const v = store.get(tempKey);
+  if (!v) return;
+  store.set(realKey, { ...v, ts: Date.now() });
+}

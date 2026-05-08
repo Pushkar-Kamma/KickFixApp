@@ -4,3 +4,9 @@ declare module 'react-native-vision-camera-mlkit' {
       poseDetection: (frame: any) => any;
     };
   }
+
+
+declare module '@env' {
+  export const SUPABASE_URL: string;
+  export const SUPABASE_ANON_KEY: string;
+}
