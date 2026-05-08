@@ -157,10 +157,10 @@ const styles = StyleSheet.create({
   toggleBtn: {
     flex: 1,
     paddingVertical: spacing.sm,
-    borderWidth: 1, borderColor: '#222222',
+    borderWidth: 1, borderColor: colors.cardBorder,
     borderRadius: borderRadius.full,
     alignItems: 'center',
-    backgroundColor: '#161111',
+    backgroundColor: colors.card,
   },
   toggleBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   toggleText: {
@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
     width: 110,
   },
   barTrack: {
-    flex: 1, height: 8, backgroundColor: '#1a1414', borderRadius: 4, overflow: 'hidden',
+    flex: 1, height: 8, backgroundColor: colors.trackBg, borderRadius: 4, overflow: 'hidden',
   },
   barFill: { height: '100%', backgroundColor: colors.primary, borderRadius: 4 },
   barValue: {
@@ -196,7 +196,7 @@ const styles = StyleSheet.create({
   },
 
   empty: {
-    backgroundColor: '#161111', borderRadius: borderRadius.md,
+    backgroundColor: colors.card, borderRadius: borderRadius.md,
     padding: spacing.xl, alignItems: 'center', marginTop: spacing.lg,
   },
   emptyTitle: {

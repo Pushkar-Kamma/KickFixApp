@@ -189,7 +189,7 @@ const styles = StyleSheet.create({
 
   /* Massive athletic cards — sharp corners, warm-dark fill */
   kickCard: {
-    backgroundColor: '#161111',
+    backgroundColor: colors.card,
     borderRadius: 4,            // sharp, geometric
     paddingVertical: spacing.xl,
     paddingHorizontal: spacing.lg,
@@ -232,7 +232,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: '#161111',
+    backgroundColor: colors.card,
     borderTopLeftRadius: 8,
     borderTopRightRadius: 8,
     paddingHorizontal: spacing.lg,
@@ -241,7 +241,7 @@ const styles = StyleSheet.create({
   sheetHandle: {
     alignSelf: 'center',
     width: 40, height: 4, borderRadius: 2,
-    backgroundColor: '#3A2A2A',
+    backgroundColor: colors.cardBorder,
     marginBottom: spacing.lg,
   },
   sheetEyebrow: {

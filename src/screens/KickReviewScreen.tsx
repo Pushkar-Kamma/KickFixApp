@@ -324,9 +324,9 @@ const styles = StyleSheet.create({
 
   replayBox: {
     alignSelf: 'center',
-    backgroundColor: '#161111',
+    backgroundColor: colors.card,
     borderRadius: 4,
-    borderWidth: 1, borderColor: '#222222',
+    borderWidth: 1, borderColor: colors.cardBorder,
     overflow: 'hidden',
   },
   frameLabel: {
@@ -345,8 +345,8 @@ const styles = StyleSheet.create({
   },
   ctrlBtn: {
     width: 44, height: 44, borderRadius: 22,
-    backgroundColor: '#161111',
-    borderWidth: 1, borderColor: '#222222',
+    backgroundColor: colors.card,
+    borderWidth: 1, borderColor: colors.cardBorder,
     alignItems: 'center', justifyContent: 'center',
   },
   playBtn: {
@@ -358,7 +358,7 @@ const styles = StyleSheet.create({
 
   scrubTrack: {
     height: 6, marginTop: spacing.lg,
-    backgroundColor: '#222222', borderRadius: 3,
+    backgroundColor: colors.cardBorder, borderRadius: 3,
     overflow: 'visible',
   },
   scrubFill: {
@@ -393,8 +393,8 @@ const styles = StyleSheet.create({
   },
   metricCell: {
     width: (REPLAY_W - spacing.sm * 2) / 3,
-    backgroundColor: '#2A2424',
-    borderWidth: 1, borderColor: '#222222',
+    backgroundColor: colors.cardElevated,
+    borderWidth: 1, borderColor: colors.cardBorder,
     paddingVertical: spacing.sm, paddingHorizontal: spacing.sm,
     borderRadius: 4,
   },
@@ -410,7 +410,7 @@ const styles = StyleSheet.create({
   critRow: {
     flexDirection: 'row', alignItems: 'flex-start',
     paddingVertical: spacing.sm, paddingHorizontal: spacing.sm,
-    backgroundColor: '#2A2424',
+    backgroundColor: colors.cardElevated,
     borderRadius: 4, marginBottom: spacing.xs,
     borderLeftWidth: 3,
   },

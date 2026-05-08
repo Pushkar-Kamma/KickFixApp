@@ -35,26 +35,38 @@ export async function getRecentSessions(userId: string, limit = 10) {
 }
 
 export async function getSessionStats(userId: string) {
-  const { data, error } = await supabase
-    .from('sessions')
-    .select('total_kicks, good_kicks, bad_kicks, max_streak')
+  // Source of truth = the kicks table itself (sessions table only updates
+  // total_kicks on endSession, which can drift if a session is killed mid-flow).
+  const { data: kicks } = await supabase
+    .from('kicks')
+    .select('engine_data, session_id')
     .eq('user_id', userId);
 
-  if (error || !data || data.length === 0) {
+  if (!kicks || kicks.length === 0) {
     return { totalKicks: 0, goodKicks: 0, badKicks: 0, bestStreak: 0, sessionCount: 0 };
   }
 
   let totalKicks = 0;
   let goodKicks = 0;
   let badKicks = 0;
+  const sessionIds = new Set<string>();
+  // Streak = longest consecutive run of kicks with score >= 70 (a "good" kick)
+  let curStreak = 0;
   let bestStreak = 0;
 
-  for (const s of data) {
-    totalKicks += s.total_kicks ?? 0;
-    goodKicks += s.good_kicks ?? 0;
-    badKicks += s.bad_kicks ?? 0;
-    if ((s.max_streak ?? 0) > bestStreak) bestStreak = s.max_streak ?? 0;
+  for (const k of kicks) {
+    totalKicks += 1;
+    if (k.session_id) sessionIds.add(k.session_id);
+    const score = k.engine_data?.score ?? 0;
+    if (score >= 70) {
+      goodKicks += 1;
+      curStreak += 1;
+      if (curStreak > bestStreak) bestStreak = curStreak;
+    } else {
+      badKicks += 1;
+      curStreak = 0;
+    }
   }
 
-  return { totalKicks, goodKicks, badKicks, bestStreak, sessionCount: data.length };
+  return { totalKicks, goodKicks, badKicks, bestStreak, sessionCount: sessionIds.size };
 }

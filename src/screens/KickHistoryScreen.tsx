@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
   peakBox: {
     width: PEAK_W,
     height: PEAK_H,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: colors.surface,
     borderRadius: 4,
     borderWidth: 1, borderColor: colors.cardBorder,
     alignItems: 'center', justifyContent: 'center',

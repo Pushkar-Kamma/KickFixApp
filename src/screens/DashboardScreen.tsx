@@ -7,7 +7,7 @@ import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { colors, spacing, borderRadius, fonts } from '../theme';
 import { supabase } from '../lib/supabase';
-import { getSessionStats, getRecentSessions } from '../services/sessions';
+import { getSessionStats } from '../services/sessions';
 import { getRecentKicks } from '../services/kicks';
 import { getProfile } from '../services/profiles';
 import { getDailyProgress, getStreak, readGoals, maybeAdvanceStreak, type DailyProgress, type StreakState, type UserGoals } from '../services/goals';
@@ -22,6 +22,11 @@ const { width: SCREEN_W } = Dimensions.get('window');
 const HM_DAY_LABEL_W = 12;
 const HM_GAP = 3;
 const HM_CELL = Math.floor((SCREEN_W - 32 /* horizontal padding */ - 32 /* card padding */ - HM_DAY_LABEL_W - HM_GAP * 11) / 12);
+
+/** Format a Date as YYYY-MM-DD using LOCAL components (not UTC). */
+function localDateKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 /* ── Geometric SVG-style icons (rendered as Text with custom shapes) ── */
 // Sharp lightning bolt: two parallelograms forming a Z-bolt
@@ -231,16 +236,15 @@ function GoalRow({ label, current, target, unit, met }: {
 
 const goalStyles = StyleSheet.create({
   card: {
-    backgroundColor: '#2A2424',
-    borderWidth: 1, borderColor: '#222222',
-    borderRadius: 4,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
     padding: spacing.md,
     marginBottom: spacing.lg,
   },
   emptyCard: {
-    backgroundColor: '#161111',
-    borderWidth: 1, borderColor: colors.primary + '55',
-    borderRadius: 4,
+    backgroundColor: colors.card,
+    borderWidth: 1, borderColor: colors.primaryTintBorder,
+    borderRadius: borderRadius.md,
     padding: spacing.md,
     marginBottom: spacing.lg,
     alignItems: 'flex-start',
@@ -283,7 +287,7 @@ const goalStyles = StyleSheet.create({
     fontFamily: fonts.montserratBold, fontSize: 13, color: colors.white,
   },
   barTrack: {
-    height: 6, backgroundColor: '#1a1414', borderRadius: 3, overflow: 'hidden',
+    height: 6, backgroundColor: colors.trackBg, borderRadius: 3, overflow: 'hidden',
   },
   barFill: {
     height: '100%', borderRadius: 3,
@@ -317,12 +321,23 @@ export default function DashboardScreen({ navigation }: Props) {
     const { data: kicks } = await getRecentKicks(uid, 10);
     if (kicks) setRecentKicks(kicks);
 
-    const { data: sessions } = await getRecentSessions(uid, 90);
-    if (sessions) {
+    // Heatmap: source = kicks table (single source of truth, matches stats card).
+    // Last 12 weeks (84 days) — enough for the visible grid.
+    const heatStart = new Date();
+    heatStart.setHours(0, 0, 0, 0);
+    heatStart.setDate(heatStart.getDate() - 90);
+    const { data: heatKicks } = await supabase
+      .from('kicks')
+      .select('created_at')
+      .eq('user_id', uid)
+      .gte('created_at', heatStart.toISOString());
+    if (heatKicks) {
       const map: Record<string, number> = {};
-      for (const sess of sessions) {
-        const day = sess.started_at.slice(0, 10);
-        map[day] = (map[day] || 0) + (sess.total_kicks ?? 0);
+      for (const k of heatKicks) {
+        // Bucket by LOCAL date (not UTC). Otherwise late-evening kicks in
+        // positive timezones get pushed to the next day.
+        const day = localDateKey(new Date(k.created_at));
+        map[day] = (map[day] || 0) + 1;
       }
       setHeatmap(map);
     }
@@ -353,7 +368,7 @@ export default function DashboardScreen({ navigation }: Props) {
   // Last column ends with today.
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const todayKey = today.toISOString().slice(0, 10);
+  const todayKey = localDateKey(today);
   const dayOfWeek = today.getDay(); // 0 = Sun
   // Total cells = 12 weeks * 7 + (days into current week)
   const WEEKS = 12;
@@ -365,7 +380,7 @@ export default function DashboardScreen({ navigation }: Props) {
     for (let d = 0; d < 7; d++) {
       const dt = new Date(startSunday);
       dt.setDate(startSunday.getDate() + w * 7 + d);
-      heatmapDays.push(dt.toISOString().slice(0, 10));
+      heatmapDays.push(localDateKey(dt));
     }
   }
 
@@ -379,7 +394,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const getHeatColor = (count: number, dateKey: string) => {
     // Future days = transparent (haven't happened yet)
     if (dateKey > todayKey) return 'transparent';
-    if (count === 0) return '#1a1414'; // "empty but tracked" — dark grey
+    if (count === 0) return colors.trackBg; // "empty but tracked" — dark grey
     if (median === 0) return colors.primary; // first kick ever
     const ratio = count / median;
     if (ratio < 0.25) return 'rgba(211, 47, 47, 0.20)';
@@ -518,7 +533,7 @@ export default function DashboardScreen({ navigation }: Props) {
             {/* Legend */}
             <View style={styles.heatLegend}>
               <Text style={styles.heatLegendText}>Less</Text>
-              {['#1a1414', 'rgba(211, 47, 47, 0.20)', 'rgba(211, 47, 47, 0.45)', 'rgba(211, 47, 47, 0.75)', colors.primary].map((bg, i) => (
+              {[colors.trackBg, 'rgba(211, 47, 47, 0.20)', 'rgba(211, 47, 47, 0.45)', 'rgba(211, 47, 47, 0.75)', colors.primary].map((bg, i) => (
                 <View key={i} style={[styles.heatCell, { backgroundColor: bg }]} />
               ))}
               <Text style={styles.heatLegendText}>More</Text>
@@ -538,25 +553,9 @@ export default function DashboardScreen({ navigation }: Props) {
           </View>
         )}
 
-        {/* Action Buttons */}
-        <View style={styles.actionRow}>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => navigation.navigate('SetGoals')}
-            activeOpacity={0.8}>
-            <ReticleIcon size={24} color={colors.primary} />
-            <Text style={styles.actionText}>Set Goals</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => navigation.navigate('KickHistory')}
-            activeOpacity={0.8}>
-            <DocIcon size={24} color={colors.primary} />
-            <Text style={styles.actionText}>Kick History</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Action Buttons (Set Goals / Kick History) — moved below Fighter Attributes */}
 
-        {/* Recent Kicks */}
+        {/* Fighter Attributes preview */}
         {attrs && attrs.hasEnoughData && (
           <TouchableOpacity
             style={styles.attrCard}
@@ -588,7 +587,29 @@ export default function DashboardScreen({ navigation }: Props) {
           </TouchableOpacity>
         )}
 
-        <Text style={styles.sectionTitle}>Recent Kicks</Text>
+        {/* Action Buttons (Set Goals / Kick History) */}
+        <View style={styles.actionRow}>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => navigation.navigate('SetGoals')}
+            activeOpacity={0.8}>
+            <ReticleIcon size={24} color={colors.primary} />
+            <Text style={styles.actionText}>Set Goals</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => navigation.navigate('KickHistory')}
+            activeOpacity={0.8}>
+            <DocIcon size={24} color={colors.primary} />
+            <Text style={styles.actionText}>Kick History</Text>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity
+          onPress={() => navigation.navigate('KickHistory')}
+          activeOpacity={0.7}>
+          <Text style={styles.sectionTitle}>Recent Kicks</Text>
+        </TouchableOpacity>
         {recentKicks.length === 0 ? (
           <View style={styles.emptyState}>
             <HeavyBagIcon size={64} />
@@ -597,7 +618,11 @@ export default function DashboardScreen({ navigation }: Props) {
           </View>
         ) : (
           recentKicks.slice(0, 5).map(kick => (
-            <View key={kick.id} style={styles.kickRow}>
+            <TouchableOpacity
+              key={kick.id}
+              style={styles.kickRow}
+              onPress={() => navigation.navigate('KickHistory')}
+              activeOpacity={0.7}>
               <View style={styles.kickScoreBadge}>
                 <Text style={[styles.kickScoreText, { color: scoreColor(kick.engine_data.score) }]}>
                   {kick.engine_data.score}
@@ -609,7 +634,7 @@ export default function DashboardScreen({ navigation }: Props) {
                   {kick.engine_data.leg} leg · {new Date(kick.created_at).toLocaleDateString()}
                 </Text>
               </View>
-            </View>
+            </TouchableOpacity>
           ))
         )}
 
@@ -641,7 +666,7 @@ const styles = StyleSheet.create({
   statRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
   statCard: {
     flex: 1,
-    backgroundColor: '#161111',
+    backgroundColor: colors.card,
     borderRadius: borderRadius.md,
     paddingVertical: spacing.lg,
     paddingHorizontal: spacing.sm,
@@ -666,7 +691,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    backgroundColor: '#161111',
+    backgroundColor: colors.card,
     borderRadius: borderRadius.md,
     padding: spacing.md,
     marginBottom: spacing.lg,
@@ -695,7 +720,7 @@ const styles = StyleSheet.create({
 
   /* ── Heatmap (12-week grid) ── */
   heatmapCard: {
-    backgroundColor: '#161111',
+    backgroundColor: colors.card,
     borderRadius: borderRadius.md,
     padding: spacing.md,
     marginBottom: spacing.lg,
@@ -754,7 +779,7 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     gap: spacing.sm,
     marginTop: spacing.sm,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: colors.surface,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
     borderRadius: 4,
@@ -777,7 +802,7 @@ const styles = StyleSheet.create({
   /* ── Fighter Attributes preview ── */
   attrCard: {
     flexDirection: 'row',
-    backgroundColor: '#161111',
+    backgroundColor: colors.card,
     borderRadius: borderRadius.md,
     padding: spacing.md,
     marginBottom: spacing.lg,
@@ -804,7 +829,7 @@ const styles = StyleSheet.create({
 
   /* ── Empty States ── */
   emptyState: {
-    backgroundColor: '#161111',
+    backgroundColor: colors.card,
     borderRadius: borderRadius.md,
     padding: spacing.xl,
     alignItems: 'center',
@@ -863,7 +888,7 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
   actionButton: {
     flex: 1,
-    backgroundColor: '#161111',
+    backgroundColor: colors.card,
     borderRadius: borderRadius.md,
     paddingVertical: spacing.md,
     alignItems: 'center',
@@ -889,7 +914,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: borderRadius.sm,
-    backgroundColor: '#161111',
+    backgroundColor: colors.card,
     justifyContent: 'center',
     alignItems: 'center',
   },

@@ -127,6 +127,15 @@ export default function CameraScreen({ route, navigation }: Props) {
         return;
       }
 
+      // Discard likely false positives — kicks scoring below 45 are usually
+      // detection noise (waved leg, partial kick, lost tracking mid-motion).
+      // Don't increment counters, don't persist, just flash a notice.
+      if (result.score < 45) {
+        setNotice(`Ignored — low quality kick (${result.score}/100).`);
+        setTimeout(() => setNotice(''), 2500);
+        return;
+      }
+
       totalKicks.current += 1;
       const passed = result.score >= 70;
       if (passed) {

@@ -136,8 +136,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
     borderRadius: borderRadius.md,
     padding: spacing.md,
     marginBottom: spacing.md,
@@ -147,7 +145,7 @@ const styles = StyleSheet.create({
   goalInfo: { flex: 1 },
   goalLabel: { fontFamily: fonts.oswaldRegular, fontSize: 12, color: colors.textMuted, letterSpacing: 0.5, marginBottom: spacing.xs },
   goalInput: {
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: colors.cardElevated,
     borderRadius: borderRadius.sm,
     paddingVertical: 10,
     paddingHorizontal: spacing.md,

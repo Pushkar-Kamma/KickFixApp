@@ -54,10 +54,6 @@ function windowStartIso(window: AttrWindow): string | null {
   return d.toISOString();
 }
 
-function windowDays(window: AttrWindow): number {
-  return window === '7d' ? 7 : window === '30d' ? 30 : 90; // 'all' uses 90d for conditioning denom
-}
-
 export async function getFighterAttributes(userId: string, window: AttrWindow = '30d'): Promise<FighterAttributes> {
   const startIso = windowStartIso(window);
   let query = supabase.from('kicks').select('*').eq('user_id', userId);
@@ -129,12 +125,32 @@ export async function getFighterAttributes(userId: string, window: AttrWindow = 
     footwork = clamp(avg(fwRates));
   }
 
-  // ── CONDITIONING: volume + consistency ───────────────────────────────────
-  const dDays = windowDays(window);
-  const targetTotal = 50 * dDays; // aspirational: 50 kicks/day
-  const volume = Math.min(100, (kicks.length / targetTotal) * 100);
-  const activeDays = new Set(kicks.map(k => k.created_at.slice(0, 10))).size;
-  const consistency = (activeDays / dDays) * 100;
+  // ── CONDITIONING: volume + consistency over a FIXED last 7 days ──────────
+  // (Window-independent on purpose: a fighter's current conditioning shouldn't
+  // change based on which time toggle they tap. We always look at recent form.)
+  const condStart = new Date();
+  condStart.setHours(0, 0, 0, 0);
+  condStart.setDate(condStart.getDate() - 6); // last 7 days inclusive
+  const condStartIso = condStart.toISOString();
+  let condKicks: DbKick[] = [];
+  try {
+    const { data } = await supabase
+      .from('kicks')
+      .select('created_at')
+      .eq('user_id', userId)
+      .gte('created_at', condStartIso)
+      .returns<DbKick[]>();
+    condKicks = data ?? [];
+  } catch {}
+  const COND_DAYS = 7;
+  const targetTotal = 50 * COND_DAYS; // 50 kicks/day target
+  const volume = Math.min(100, (condKicks.length / targetTotal) * 100);
+  // Bucket by LOCAL date (matches dashboard heatmap)
+  const activeDays = new Set(condKicks.map(k => {
+    const dt = new Date(k.created_at);
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+  })).size;
+  const consistency = (activeDays / COND_DAYS) * 100;
   const conditioning = clamp(volume * 0.5 + consistency * 0.5);
 
   // ── Overall ──────────────────────────────────────────────────────────────

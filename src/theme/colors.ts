@@ -1,9 +1,12 @@
 export const colors = {
   background: '#000000',
-  surface: '#0A0A0A',
-  surfaceLight: '#1A1A1A',
-  card: '#1A1A1A',
-  cardBorder: '#2A2A2A',
+  // Card surfaces — warm-tinted dark grey, used everywhere uniformly
+  surface: '#0A0A0A',          // deepest surface (rare use)
+  surfaceLight: '#1F1818',     // input bg / lifted areas
+  card: '#161111',             // ← canonical card colour (matches dashboard)
+  cardBorder: '#222222',
+  cardElevated: '#2A2424',     // slightly raised cards (e.g. metric tiles)
+  trackBg: '#1A1414',          // background for progress bars / scrubber
 
   primary: '#D32F2F',
   primaryDim: '#B71C1C',
