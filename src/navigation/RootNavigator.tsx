@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import BootSplash from 'react-native-bootsplash';
 import AppTabs from './AppTabs';
 import AuthStack from './AuthStack';
 import { ProfileSetupScreen } from '../screens';
@@ -84,6 +85,14 @@ export default function RootNavigator() {
   }, [checkProfile]);
 
   const isAuthenticated = !!session?.user;
+
+  // Hide the native splash screen once auth is resolved.
+  // Wrapped in try/catch so a missing native module never crashes the app.
+  useEffect(() => {
+    if (isReady && !profileLoading) {
+      BootSplash.hide({ fade: true }).catch(() => {});
+    }
+  }, [isReady, profileLoading]);
 
   if (!isReady || profileLoading) {
     return (
