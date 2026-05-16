@@ -3,6 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import BootSplash from 'react-native-bootsplash';
+import EncryptedStorage from 'react-native-encrypted-storage';
 import AppTabs from './AppTabs';
 import AuthStack from './AuthStack';
 import { ProfileSetupScreen } from '../screens';
@@ -13,22 +14,22 @@ import { getProfile } from '../services/profiles';
 import type { Session } from '@supabase/supabase-js';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+const HAS_PROFILE_KEY = 'kickfix.hasProfile';
 
 export default function RootNavigator() {
   const [session, setSession] = useState<Session | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [hasProfile, setHasProfile] = useState(false);
-  const [profileLoading, setProfileLoading] = useState(false);
 
-  const checkProfile = useCallback(async (userId: string) => {
-    setProfileLoading(true);
+  // Background refresh of profile status. Updates cache + state without blocking UI.
+  const refreshProfile = useCallback(async (userId: string) => {
     try {
       const { data } = await getProfile(userId);
-      setHasProfile(!!data?.username);
+      const has = !!data?.username;
+      setHasProfile(has);
+      EncryptedStorage.setItem(HAS_PROFILE_KEY, has ? '1' : '0').catch(() => {});
     } catch {
-      setHasProfile(false);
-    } finally {
-      setProfileLoading(false);
+      // ignore — keep cached value
     }
   }, []);
 
@@ -36,45 +37,40 @@ export default function RootNavigator() {
     let isMounted = true;
 
     (async () => {
-      // Timeout to prevent infinite loading
+      // Safety: never sit on splash longer than 4s no matter what.
       const timeout = setTimeout(() => {
-        console.log('[RootNav] Timeout — forcing ready');
-        if (isMounted) {
-          setSession(null);
-          setIsReady(true);
-        }
-      }, 5000);
+        if (isMounted && !isReady) setIsReady(true);
+      }, 4000);
 
       try {
-        console.log('[RootNav] Getting session...');
+        // Read cached hasProfile FIRST — sync render decision without network.
+        const cached = await EncryptedStorage.getItem(HAS_PROFILE_KEY).catch(() => null);
+        if (isMounted && cached === '1') setHasProfile(true);
+
         const { data } = await supabase.auth.getSession();
-        console.log('[RootNav] Session result:', !!data.session);
         if (!isMounted) return;
         const s = data.session ?? null;
         setSession(s);
-        if (s?.user) {
-          console.log('[RootNav] Checking profile for', s.user.id);
-          await checkProfile(s.user.id);
-          console.log('[RootNav] Profile check done');
-        }
-      } catch (e) {
-        console.log('[RootNav] Error:', e);
+
+        // Refresh profile in background — do NOT await, don't block render.
+        if (s?.user) refreshProfile(s.user.id);
+      } catch {
         if (!isMounted) return;
         setSession(null);
       } finally {
         clearTimeout(timeout);
-        console.log('[RootNav] Setting isReady=true');
         if (isMounted) setIsReady(true);
       }
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
       if (!isMounted) return;
       setSession(newSession);
       if (newSession?.user) {
-        await checkProfile(newSession.user.id);
+        refreshProfile(newSession.user.id);
       } else {
         setHasProfile(false);
+        EncryptedStorage.removeItem(HAS_PROFILE_KEY).catch(() => {});
       }
     });
 
@@ -82,19 +78,21 @@ export default function RootNavigator() {
       isMounted = false;
       sub.subscription.unsubscribe();
     };
-  }, [checkProfile]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshProfile]);
 
   const isAuthenticated = !!session?.user;
 
-  // Hide the native splash screen once auth is resolved.
-  // Wrapped in try/catch so a missing native module never crashes the app.
+  // Hide the native splash screen as soon as auth state is resolved.
+  // Do NOT wait for profileLoading — a slow profile fetch would keep splash up.
+  // The loading spinner below covers the brief gap if profile check is still running.
   useEffect(() => {
-    if (isReady && !profileLoading) {
+    if (isReady) {
       BootSplash.hide({ fade: true }).catch(() => {});
     }
-  }, [isReady, profileLoading]);
+  }, [isReady]);
 
-  if (!isReady || profileLoading) {
+  if (!isReady) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.primary} />

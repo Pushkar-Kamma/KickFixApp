@@ -7,6 +7,11 @@
 # For more details, see
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
+# ── react-native-encrypted-storage ────────────────────────────────────────
+-keep class com.emeraldsanto.encryptedstorage.** { *; }
+-keep class androidx.security.crypto.** { *; }
+-keep class com.google.crypto.tink.** { *; }
+
 # ── React Native bridge / TurboModules ────────────────────────────────────
 -keep,includedescriptorclasses class com.facebook.react.bridge.** { *; }
 -keep,allowobfuscation class * extends com.facebook.react.bridge.NativeModule
