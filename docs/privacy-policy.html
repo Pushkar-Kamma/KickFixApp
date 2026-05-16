@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KickFix — Privacy Policy</title>
+  <link rel="icon" type="image/png" href="logo.png" />
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      background: #000000;
+      color: #e8e8e8;
+      font-family: 'Inter', system-ui, sans-serif;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 48px 24px 96px;
+    }
+    header {
+      text-align: center;
+      padding-bottom: 32px;
+      border-bottom: 1px solid #1a1a1a;
+      margin-bottom: 40px;
+    }
+    .logo {
+      width: 72px;
+      height: 72px;
+      margin: 0 auto 16px;
+      display: block;
+    }
+    .brand {
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 900;
+      font-size: 34px;
+      letter-spacing: 2px;
+    }
+    .brand .red { color: #E53935; }
+    .brand .white { color: #ffffff; }
+    .subtitle {
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: 4px;
+      color: #888;
+      margin-top: 8px;
+      text-transform: uppercase;
+    }
+    .effective {
+      color: #666;
+      font-size: 13px;
+      margin-top: 12px;
+    }
+    h2 {
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 900;
+      font-size: 20px;
+      color: #ffffff;
+      margin: 40px 0 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      border-left: 3px solid #E53935;
+      padding-left: 12px;
+    }
+    h3 {
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 700;
+      font-size: 15px;
+      color: #ffffff;
+      margin: 24px 0 8px;
+      letter-spacing: 0.5px;
+    }
+    p, li {
+      color: #c9c9c9;
+      font-size: 15px;
+      margin-bottom: 12px;
+    }
+    ul {
+      padding-left: 24px;
+    }
+    li { margin-bottom: 8px; }
+    strong { color: #ffffff; font-weight: 700; }
+    a { color: #E53935; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      background: #1a1414;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+      color: #ffaaaa;
+    }
+    .callout {
+      background: #0d0d0d;
+      border: 1px solid #1f1f1f;
+      border-left: 3px solid #E53935;
+      padding: 16px 20px;
+      border-radius: 6px;
+      margin: 16px 0 24px;
+    }
+    .callout p { margin-bottom: 0; }
+    footer {
+      margin-top: 64px;
+      padding-top: 32px;
+      border-top: 1px solid #1a1a1a;
+      text-align: center;
+      color: #555;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <img src="logo.png" alt="KickFix" class="logo" />
+      <div class="brand"><span class="white">KICK</span><span class="red">FIX</span></div>
+      <div class="subtitle">Privacy Policy</div>
+      <div class="effective">Effective: May 16, 2026</div>
+    </header>
+
+    <h2>Introduction</h2>
+    <p>
+      KickFix ("we", "our", "the app") is a mobile application that uses your device camera and on-device pose estimation to analyze your martial-arts kicks and give you feedback. This policy explains exactly what data we collect, why we collect it, how it is stored, and the controls you have over it.
+    </p>
+    <p>
+      By creating an account or using KickFix, you agree to this policy. If you do not agree, please uninstall the app and do not create an account.
+    </p>
+
+    <h2>1. Data We Collect</h2>
+
+    <h3>1.1 Account Information</h3>
+    <p>When you sign up we collect:</p>
+    <ul>
+      <li><strong>Email address</strong> — required for authentication and password recovery.</li>
+      <li><strong>Password</strong> — stored as a salted hash by our authentication provider. We never see your plaintext password.</li>
+    </ul>
+
+    <h3>1.2 Profile Information</h3>
+    <p>Optional fields you fill in during setup or in your profile:</p>
+    <ul>
+      <li>Username (display name)</li>
+      <li>Belt level</li>
+      <li>Height (cm)</li>
+    </ul>
+
+    <h3>1.3 Kick Data</h3>
+    <p>When you record a kick, we store:</p>
+    <ul>
+      <li><strong>Pose landmark coordinates</strong> — numerical (x, y, z) positions of 33 body keypoints across the duration of the kick, derived from on-device computer vision. These are abstract numerical points; <strong>no video, no photo, no images of your face or body are saved or transmitted.</strong></li>
+      <li>Computed metrics: score, tier, kick type, dominant leg, frame counts.</li>
+      <li>Timestamp of the kick.</li>
+    </ul>
+
+    <div class="callout">
+      <p><strong>Important — about the camera:</strong> KickFix uses your camera live, on your device, to extract pose landmarks. Camera frames are <strong>processed in memory and discarded immediately</strong>. We do not record, upload, or save any video or photo data.</p>
+    </div>
+
+    <h3>1.4 Diagnostic Information</h3>
+    <p>If the app crashes or hits an unexpected error, we automatically collect:</p>
+    <ul>
+      <li>Error message and stack trace</li>
+      <li>App version, OS version, device model</li>
+      <li>An anonymous installation identifier</li>
+    </ul>
+    <p>This is processed by <a href="https://sentry.io/privacy/" target="_blank" rel="noopener">Sentry</a> and is used only to fix bugs. It is not linked to your email or kick data.</p>
+
+    <h2>2. Biometric Data Disclosure</h2>
+    <p>
+      Pose landmark coordinates derived from your body movement may be classified as <strong>biometric data</strong> under certain laws (GDPR, CCPA, BIPA, and similar). We disclose this explicitly:
+    </p>
+    <ul>
+      <li>We collect landmark coordinates <strong>only when you actively record a kick.</strong></li>
+      <li>We use them <strong>only to score your kick and to let you replay the analysis later.</strong></li>
+      <li>We <strong>do not</strong> use them for identification, tracking, advertising, training third-party AI models, or sale to any party.</li>
+      <li>The on-device pose detection model (Google MediaPipe BlazePose) runs entirely on your device. Raw camera frames are not sent off-device.</li>
+    </ul>
+
+    <h2>3. How Your Data Is Stored</h2>
+    <ul>
+      <li>Account, profile, and kick data are stored in <strong>Supabase</strong> (PostgreSQL with row-level security), hosted on secure cloud infrastructure.</li>
+      <li><strong>Row-level security policies</strong> ensure no other user can read or modify your data.</li>
+      <li>Your authentication token is stored locally on your device using <strong>Android Keystore-backed encrypted storage</strong>.</li>
+      <li>Data in transit is encrypted via HTTPS/TLS.</li>
+    </ul>
+
+    <h2>4. How We Use Your Data</h2>
+    <p>We use your data <strong>only</strong> to:</p>
+    <ul>
+      <li>Provide the KickFix app and its features (scoring, replay, history, fighter attributes).</li>
+      <li>Authenticate you and keep you signed in.</li>
+      <li>Diagnose and fix crashes (anonymized diagnostic data only).</li>
+    </ul>
+    <p>We <strong>do not</strong>:</p>
+    <ul>
+      <li>Sell or rent your data to anyone.</li>
+      <li>Use your data for targeted advertising.</li>
+      <li>Share your data with social networks or advertising networks.</li>
+      <li>Use your kicks or landmarks to train machine-learning models.</li>
+    </ul>
+
+    <h2>5. Data Sharing</h2>
+    <p>We share data only with the following service providers, strictly to operate the app:</p>
+    <ul>
+      <li><strong>Supabase</strong> — database and authentication backend. <a href="https://supabase.com/privacy" target="_blank" rel="noopener">Privacy policy</a>.</li>
+      <li><strong>Sentry</strong> — crash diagnostics. <a href="https://sentry.io/privacy/" target="_blank" rel="noopener">Privacy policy</a>.</li>
+      <li><strong>Google Play</strong> — app distribution. <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Privacy policy</a>.</li>
+    </ul>
+
+    <h2>6. Your Rights</h2>
+    <h3>6.1 Account Deletion</h3>
+    <p>
+      You can permanently delete your account and all associated data at any time from <strong>Profile → Delete Account</strong> inside the app. Deletion is immediate and irreversible. It removes:
+    </p>
+    <ul>
+      <li>Your authentication record</li>
+      <li>Your profile</li>
+      <li>All recorded kicks and pose landmark frames</li>
+      <li>Any related data linked to your user ID</li>
+    </ul>
+
+    <h3>6.2 Access and Correction</h3>
+    <p>
+      You can view your profile and kick history inside the app at any time. To request a machine-readable export of your data, or correction of inaccurate data, contact us at the email below.
+    </p>
+
+    <h3>6.3 GDPR / CCPA Rights</h3>
+    <p>
+      If you are in the EU, EEA, UK, or California, you have additional rights including: the right to access, rectify, port, restrict processing, or object to processing of your personal data. To exercise these rights, contact us at the email below.
+    </p>
+
+    <h2>7. Permissions We Request</h2>
+    <ul>
+      <li><strong>Camera</strong> — required to detect your pose for kick analysis. The app does not function without this permission.</li>
+      <li><strong>Internet</strong> — required to sync your kicks and profile with our backend.</li>
+    </ul>
+    <p>We do not request location, microphone, contacts, storage, or other sensitive permissions.</p>
+
+    <h2>8. Children</h2>
+    <p>
+      KickFix is not directed to children under 13. We do not knowingly collect data from anyone under 13. If you believe a child has signed up, contact us and we will delete the account.
+    </p>
+
+    <h2>9. Data Retention</h2>
+    <p>
+      Account and kick data are retained for as long as your account is active. If you delete your account, all associated data is removed immediately. Diagnostic crash data is retained for up to 90 days by Sentry, then deleted.
+    </p>
+
+    <h2>10. International Transfers</h2>
+    <p>
+      Our service providers may store data on servers located outside your country of residence. Where applicable, transfers are governed by Standard Contractual Clauses or equivalent safeguards.
+    </p>
+
+    <h2>11. Changes to This Policy</h2>
+    <p>
+      We may update this policy from time to time. Material changes will be communicated in-app or by email. The "Effective" date at the top will be updated. Continued use of the app after changes constitutes acceptance.
+    </p>
+
+    <h2>12. Contact</h2>
+    <p>
+      For any privacy questions, requests, or concerns, contact:
+    </p>
+    <p>
+      <strong>Email:</strong> <a href="mailto:dojo@kickfix.edstart.xyz">dojo@kickfix.edstart.xyz</a>
+    </p>
+
+    <footer>
+      © 2026 KickFix. All rights reserved.
+    </footer>
+  </div>
+</body>
+</html>
