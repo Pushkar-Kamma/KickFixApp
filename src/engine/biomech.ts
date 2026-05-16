@@ -146,3 +146,14 @@ export function detectKickingLeg(imageFrames: Landmark[][]): 'Left' | 'Right' | 
   // Smaller y = higher on screen = the kicking leg
   return lA.y < rA.y ? 'Left' : 'Right';
 }
+
+/**
+ * Convert internal leg label ('Left'/'Right' = image-space side / MediaPipe
+ * keypoint side) to the user-facing anatomical side. Front-facing camera
+ * mirrors the image, so the image-left foot is the user's right foot and
+ * vice-versa. Keep the analyzer using the internal value (correct keypoints);
+ * only DISPLAY this flipped string.
+ */
+export function displayLeg(leg: 'Left' | 'Right'): 'Left' | 'Right' {
+  return leg === 'Left' ? 'Right' : 'Left';
+}

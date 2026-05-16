@@ -12,6 +12,7 @@ import { getRecentKicks } from '../services/kicks';
 import { getProfile } from '../services/profiles';
 import { getDailyProgress, getStreak, readGoals, maybeAdvanceStreak, type DailyProgress, type StreakState, type UserGoals } from '../services/goals';
 import { getFighterAttributes, type FighterAttributes } from '../services/attributes';
+import { displayLeg } from '../engine/biomech';
 import AttributeRadar from '../components/AttributeRadar';
 import type { HomeStackParamList, DbKick } from '../types';
 
@@ -631,7 +632,7 @@ export default function DashboardScreen({ navigation }: Props) {
               <View style={{ flex: 1 }}>
                 <Text style={styles.kickType}>{kick.kick_type}</Text>
                 <Text style={styles.kickMeta}>
-                  {kick.engine_data.leg} leg · {new Date(kick.created_at).toLocaleDateString()}
+                  {displayLeg(kick.engine_data.leg)} leg · {new Date(kick.created_at).toLocaleDateString()}
                 </Text>
               </View>
             </TouchableOpacity>

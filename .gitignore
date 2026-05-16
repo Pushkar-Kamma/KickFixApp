@@ -78,3 +78,6 @@ yarn-error.log
 
 # editor backup files
 *.bak
+
+# Local-only release signing credentials
+android/gradle.properties.local

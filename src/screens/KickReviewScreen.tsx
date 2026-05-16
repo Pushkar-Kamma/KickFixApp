@@ -18,6 +18,7 @@ import { takePendingKick } from '../engine/pendingKick';
 import { analyzeFrontSnap, type CriterionResult, type KickResult } from '../engine/FrontSnapAnalyzer';
 import { analyzeSideKick } from '../engine/SideKickAnalyzer';
 import { analyzeRoundhouse } from '../engine/RoundhouseAnalyzer';
+import { displayLeg } from '../engine/biomech';
 import type { PoseFrame } from '../engine/biomech';
 import SkeletonReplay from '../components/SkeletonReplay';
 
@@ -160,7 +161,7 @@ export default function KickReviewScreen({ route, navigation }: Props) {
           <TouchableOpacity onPress={() => navigation.goBack()}>
             <Text style={styles.backX}>✕</Text>
           </TouchableOpacity>
-          <Text style={styles.eyebrow}>{kickMode.toUpperCase()} • {leg.toUpperCase()} LEG</Text>
+          <Text style={styles.eyebrow}>{kickMode.toUpperCase()} • {displayLeg(leg).toUpperCase()} LEG</Text>
           <View style={{ width: 24 }} />
         </View>
 

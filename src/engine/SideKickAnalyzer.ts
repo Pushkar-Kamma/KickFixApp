@@ -73,7 +73,17 @@ export function analyzeSideKick(frames: PoseFrame[], leg: 'Left' | 'Right'): Kic
   }
 
   // Phase indices ---------------------------------------------------------
-  const peakIdx = argmax(kneeAngles);
+  // Peak frame = the frame where the KICKING ankle was highest on screen.
+  // Knee-angle argmax is unreliable because a planted standing leg is
+  // straighter than a slightly-bent leg at peak extension.
+  let peakIdx = 0;
+  {
+    let minY = Infinity;
+    for (let i = 0; i < N; i++) {
+      const y = frames[i].image[ji.kAnkle].y;
+      if (y < minY) { minY = y; peakIdx = i; }
+    }
+  }
   let chamberIdx = 0;
   let chamberMin = Infinity;
   for (let i = 0; i < peakIdx; i++) {

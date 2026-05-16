@@ -84,8 +84,21 @@ export default function ProfileSetupScreen({ onComplete }: { onComplete: () => v
   const handleSetup = async () => {
     setError(null);
     setIsLoading(true);
+
+    // Hard timeout — if any Supabase call hangs (network, RLS, etc) the user
+    // gets an error instead of being stuck with a permanently grey button.
+    const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> =>
+      Promise.race([
+        p,
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error(`${label} timed out. Check your connection.`)), ms),
+        ),
+      ]);
+
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await withTimeout(
+        supabase.auth.getSession(), 10000, 'Session check',
+      );
       if (!session?.user) {
         setError('Not authenticated. Please sign in again.');
         setIsLoading(false);
@@ -93,12 +106,21 @@ export default function ProfileSetupScreen({ onComplete }: { onComplete: () => v
       }
 
       // Check username uniqueness
-      const { data: existing } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('username', username.trim())
-        .neq('id', session.user.id)
-        .maybeSingle();
+      const { data: existing, error: lookupErr } = await withTimeout(
+        supabase
+          .from('profiles')
+          .select('id')
+          .eq('username', username.trim())
+          .neq('id', session.user.id)
+          .maybeSingle(),
+        15000,
+        'Username check',
+      );
+      if (lookupErr) {
+        setError(`Username check failed: ${lookupErr.message}`);
+        setIsLoading(false);
+        return;
+      }
 
       if (existing) {
         setError('Username already taken. Choose another.');
@@ -106,11 +128,15 @@ export default function ProfileSetupScreen({ onComplete }: { onComplete: () => v
         return;
       }
 
-      const { error: profileError } = await upsertProfile(session.user.id, {
-        username: username.trim(),
-        belt_level: belt || null,
-        height_cm: heightCm ? parseInt(heightCm, 10) : null,
-      });
+      const { error: profileError } = await withTimeout(
+        upsertProfile(session.user.id, {
+          username: username.trim(),
+          belt_level: belt || null,
+          height_cm: heightCm ? parseInt(heightCm, 10) : null,
+        }),
+        15000,
+        'Profile save',
+      );
       if (profileError) {
         setError(profileError.message);
       } else {

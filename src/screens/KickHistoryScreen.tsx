@@ -11,6 +11,7 @@ import { readCachedRecentKicks, writeCachedRecentKicks, removeCachedKick } from 
 import { loadKickFrames } from '../services/kickFrames';
 import SkeletonReplay from '../components/SkeletonReplay';
 import type { Landmark } from '../engine/biomech';
+import { displayLeg } from '../engine/biomech';
 import type { HomeStackParamList, DbKick } from '../types';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'KickHistory'>;
@@ -165,7 +166,7 @@ export default function KickHistoryScreen({ navigation }: Props) {
                       <View style={{ flex: 1 }}>
                         <Text style={styles.kickType}>{kick.kick_type}</Text>
                         <Text style={styles.kickMeta}>
-                          {kick.engine_data.leg} · {formatTime(kick.created_at)}
+                          {displayLeg(kick.engine_data.leg)} · {formatTime(kick.created_at)}
                         </Text>
                       </View>
                       <Text style={[styles.kickScore, { color: scoreColor(kick.engine_data.score) }]}>

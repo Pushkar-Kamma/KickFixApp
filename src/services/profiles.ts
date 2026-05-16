@@ -19,3 +19,12 @@ export async function upsertProfile(
     .select()
     .single<DbProfile>();
 }
+
+/**
+ * Permanently delete the signed-in user's account and all related data.
+ * Calls the `delete_my_account()` Postgres function (see migrations/003).
+ * On success, the user is automatically signed out by Supabase (auth row gone).
+ */
+export async function deleteMyAccount() {
+  return supabase.rpc('delete_my_account');
+}

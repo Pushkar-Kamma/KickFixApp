@@ -27,7 +27,7 @@ import { getDailyProgress, maybeAdvanceStreak } from '../services/goals';
 import { setPendingKick, reconcilePendingKick } from '../engine/pendingKick';
 import { bumpTelemetry } from '../services/telemetry';
 import { queueKickSave, flushKicksWAL } from '../services/kicksWAL';
-import { J, frameUsable, detectKickingLeg, angle3D, lmReq, type Landmark, type PoseFrame, type MediaPipePayload } from '../engine/biomech';
+import { J, frameUsable, detectKickingLeg, type Landmark, type PoseFrame, type MediaPipePayload } from '../engine/biomech';
 import { analyzeFrontSnap } from '../engine/FrontSnapAnalyzer';
 import { analyzeSideKick } from '../engine/SideKickAnalyzer';
 import { analyzeRoundhouse } from '../engine/RoundhouseAnalyzer';
@@ -39,19 +39,24 @@ type Props = NativeStackScreenProps<TrainStackParamList, 'Camera'>;
 
 type Phase = 'IDLE' | 'RECORDING' | 'COOLDOWN';
 
-// Detection thresholds — frame-rate INDEPENDENT (use elapsed time, not frame deltas).
+// Detection thresholds. Image-space deltas are used because MediaPipe's 2D
+// landmarks are tracked directly from pixels and are MUCH less noisy than
+// its world-space 3D reconstruction. The world-coord angular-velocity
+// approach (tried in an earlier iteration) was elegant on paper but tripped
+// constantly on the 5-10° of MediaPipe pose-jitter on a stationary leg.
 // See THRESHOLDS.md for rationale.
 const PRE_ROLL = 5;                // frames captured before kick starts (chamber prep)
 const MIN_KICK_FRAMES = 8;         // ignore noise
 const COOLDOWN_FRAMES = 6;         // require N idle frames before next kick
-/** Min knee angular velocity (deg/s) to trigger RECORDING. World-space, not image. */
-const ONSET_KNEE_VEL_DEG_S = 250;
-/** Min knee angle (deg) at peak before we'll consider "end of kick". */
-const END_PEAK_THRESHOLD_DEG = 130;
-/** Knee angle (deg) below which we consider the leg back in chamber position. */
-const END_RECHAMBER_THRESHOLD_DEG = 110;
-/** Hard safety cap on buffer length (~2s at 30fps). */
-const MAX_KICK_FRAMES = 60;
+/** Min image-Y knee rise per frame to trigger RECORDING. */
+const KNEE_VEL_ONSET = 0.06;
+/** Image-Y offset below hip at which ankle is considered "near ground" → kick ending. */
+const END_ANKLE_GROUND_OFFSET = 0.15;
+/** After end condition fires, keep recording this many more frames so the
+ *  recoil / rechamber phase is captured for analysis. */
+const POST_END_TRAIL_FRAMES = 10;
+/** Hard safety cap on buffer length (~4s at 30fps). */
+const MAX_KICK_FRAMES = 120;
 
 export default function CameraScreen({ route, navigation }: Props) {
   const kickMode: KickMode = route.params?.kickMode ?? 'Front Snap';
@@ -67,20 +72,19 @@ export default function CameraScreen({ route, navigation }: Props) {
   const [kickCount, setKickCount] = useState(0);
   const [phase, setPhase] = useState<Phase>('IDLE');
   const [criteria, setCriteria] = useState<CriterionResult[]>([]);
-  const showDebug = kickMode !== 'Front Snap';
+  const showDebug = false;
 
   // Refs (transient state — no re-render)
   const phaseRef = useRef<Phase>('IDLE');
   const buffer = useRef<PoseFrame[]>([]);
   const preRoll = useRef<PoseFrame[]>([]);
-  // Per-leg knee angle history for frame-rate-independent angular velocity detection.
-  // Each entry: { angle in deg, t in ms }. Only last 2 needed; using object for clarity.
-  const lastKneeSample = useRef<{ left: { a: number; t: number } | null; right: { a: number; t: number } | null }>({
-    left: null,
-    right: null,
-  });
-  // Peak knee angle during the current RECORDING window (used for end detection).
-  const recordingPeakAngle = useRef(0);
+  // Per-leg knee-Y in image space for onset detection. Image landmarks are
+  // tracked directly from pixels by MediaPipe — stable and noise-free.
+  const lastKneeY = useRef<{ left: number; right: number }>({ left: 0.5, right: 0.5 });
+  // Counts frames remaining in the post-end trail capture. > 0 means we've
+  // detected end-of-kick but are still buffering a few more frames so the
+  // analyzer has the recoil / rechamber data.
+  const trailFramesLeft = useRef(0);
   const cooldownLeft = useRef(0);
   const sessionId = useRef<string | null>(null);
   const userId = useRef<string | null>(null);
@@ -297,7 +301,7 @@ export default function CameraScreen({ route, navigation }: Props) {
         phaseRef.current = 'IDLE';
         setPhase('IDLE');
         buffer.current = [];
-        recordingPeakAngle.current = 0;
+        trailFramesLeft.current = 0;
         bumpTelemetry(userId.current, 'abortedKicks').catch(() => {});
         flashNotice('Lost tracking — kick aborted.');
       }
@@ -309,35 +313,19 @@ export default function CameraScreen({ route, navigation }: Props) {
     preRoll.current.push(frame);
     if (preRoll.current.length > PRE_ROLL) preRoll.current.shift();
 
-    // Knee angles in WORLD coords (rotation+scale invariant).
-    const lAngle = angle3D(
-      lmReq(world, J.L_HIP), lmReq(world, J.L_KNEE), lmReq(world, J.L_ANKLE),
-    );
-    const rAngle = angle3D(
-      lmReq(world, J.R_HIP), lmReq(world, J.R_KNEE), lmReq(world, J.R_ANKLE),
-    );
+    // ── Onset detection in IMAGE space (stable, pixel-tracked) ───────────
+    // World coords are noisy (MediaPipe reconstructs 3D from 2D), so we
+    // trigger on raw image-Y velocity. Smaller y = higher on screen.
+    const lKneeY = image[J.L_KNEE].y;
+    const rKneeY = image[J.R_KNEE].y;
+    const lDelta = lastKneeY.current.left - lKneeY;
+    const rDelta = lastKneeY.current.right - rKneeY;
+    lastKneeY.current = { left: lKneeY, right: rKneeY };
+    const maxRise = Math.max(lDelta, rDelta);
 
-    // Angular velocity (deg/sec) per leg — frame-rate independent.
-    let lVel = 0;
-    let rVel = 0;
-    const prevL = lastKneeSample.current.left;
-    const prevR = lastKneeSample.current.right;
-    if (prevL) {
-      const dt = (now - prevL.t) / 1000;
-      if (dt > 0) lVel = Math.abs(lAngle - prevL.a) / dt;
-    }
-    if (prevR) {
-      const dt = (now - prevR.t) / 1000;
-      if (dt > 0) rVel = Math.abs(rAngle - prevR.a) / dt;
-    }
-    lastKneeSample.current.left = { a: lAngle, t: now };
-    lastKneeSample.current.right = { a: rAngle, t: now };
-    const maxAngVel = Math.max(lVel, rVel);
-
-    // Standing test (sanity — hips above knees in image space, true for almost any upright pose).
     const hipY = (image[J.L_HIP].y + image[J.R_HIP].y) / 2;
-    const kneeY = (image[J.L_KNEE].y + image[J.R_KNEE].y) / 2;
-    const isStanding = hipY < kneeY;
+    const kneeYmid = (lKneeY + rKneeY) / 2;
+    const isStanding = hipY < kneeYmid;
 
     if (cooldownLeft.current > 0) {
       cooldownLeft.current -= 1;
@@ -345,32 +333,29 @@ export default function CameraScreen({ route, navigation }: Props) {
     }
 
     if (phaseRef.current === 'IDLE') {
-      // Onset: a knee is rotating fast while standing.
-      if (isStanding && maxAngVel > ONSET_KNEE_VEL_DEG_S) {
+      // Onset: a knee rose by KNEE_VEL_ONSET (image-Y) in one frame while standing.
+      if (isStanding && maxRise > KNEE_VEL_ONSET) {
         phaseRef.current = 'RECORDING';
         setPhase('RECORDING');
         buffer.current = [...preRoll.current];
-        recordingPeakAngle.current = Math.max(lAngle, rAngle);
         setHeadlineCue('Recording...');
       }
     } else if (phaseRef.current === 'RECORDING') {
       buffer.current.push(frame);
 
-      // Track peak knee angle so far in this kick.
-      const curPeak = Math.max(lAngle, rAngle);
-      if (curPeak > recordingPeakAngle.current) recordingPeakAngle.current = curPeak;
-
-      // End condition: we passed peak extension AND the kicking leg has
-      // returned toward chamber (lower knee angle). Fully rotation-invariant.
-      const reachedExtension = recordingPeakAngle.current > END_PEAK_THRESHOLD_DEG;
-      const minCurAngle = Math.min(lAngle, rAngle);
-      const reChambered = reachedExtension && minCurAngle < END_RECHAMBER_THRESHOLD_DEG;
+      // End condition: ankle returns near ground level in image space.
+      // Physical signal — foot back down. Works for all kick styles.
+      const lAnkleY = image[J.L_ANKLE].y;
+      const rAnkleY = image[J.R_ANKLE].y;
+      const ankleNearGround = Math.min(lAnkleY, rAnkleY) > hipY + END_ANKLE_GROUND_OFFSET;
       const tooLong = buffer.current.length > MAX_KICK_FRAMES;
 
-      if ((reChambered && buffer.current.length > MIN_KICK_FRAMES) || tooLong) {
+      // Once end fires, keep recording POST_END_TRAIL_FRAMES more frames so
+      // the recoil/rechamber is captured for analysis. Then finalize.
+      const finalize = () => {
         const captured = buffer.current;
         buffer.current = [];
-        recordingPeakAngle.current = 0;
+        trailFramesLeft.current = 0;
         phaseRef.current = 'COOLDOWN';
         setPhase('COOLDOWN');
         cooldownLeft.current = COOLDOWN_FRAMES;
@@ -382,6 +367,14 @@ export default function CameraScreen({ route, navigation }: Props) {
             setPhase('IDLE');
           }
         }, 250);
+      };
+
+      if (trailFramesLeft.current > 0) {
+        trailFramesLeft.current -= 1;
+        if (trailFramesLeft.current === 0 || tooLong) finalize();
+      } else if ((ankleNearGround && buffer.current.length > MIN_KICK_FRAMES) || tooLong) {
+        if (tooLong) finalize();
+        else trailFramesLeft.current = POST_END_TRAIL_FRAMES;
       }
     }
   }, [finalizeKick]);
@@ -393,8 +386,8 @@ export default function CameraScreen({ route, navigation }: Props) {
       phaseRef.current = 'IDLE';
       setPhase('IDLE');
       buffer.current = [];
-      recordingPeakAngle.current = 0;
-      lastKneeSample.current = { left: null, right: null };
+      trailFramesLeft.current = 0;
+      lastKneeY.current = { left: 0.5, right: 0.5 };
     });
     return unsub;
   }, [navigation]);
@@ -576,8 +569,9 @@ const styles = StyleSheet.create({
     letterSpacing: 3, marginTop: spacing.xs,
   },
   cue: {
-    fontFamily: fonts.interMedium, fontSize: 18, color: colors.white,
-    textAlign: 'center', marginTop: spacing.sm, lineHeight: 24,
+    fontFamily: fonts.interMedium, fontSize: 22, color: colors.white,
+    textAlign: 'center', marginTop: spacing.sm, lineHeight: 28,
+    paddingHorizontal: spacing.lg,
   },
 
   exitBtn: {

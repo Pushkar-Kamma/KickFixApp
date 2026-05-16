@@ -53,12 +53,16 @@ export default function SignUpScreen({ navigation }: Props) {
     setError(null);
     setIsLoading(true);
     try {
-      const { error: authError } = await supabase.auth.signUp({
+      const { data, error: authError } = await supabase.auth.signUp({
         email: email.trim(),
         password,
       });
       if (authError) {
         setError(authError.message);
+      } else if (data.user && data.user.identities && data.user.identities.length === 0) {
+        // Supabase returns success with empty identities[] when the email already exists
+        // (anti-enumeration). Surface a clear message so the user can sign in instead.
+        setError('An account with this email already exists. Please sign in.');
       } else {
         navigation.navigate('OTP', { email: email.trim() });
       }

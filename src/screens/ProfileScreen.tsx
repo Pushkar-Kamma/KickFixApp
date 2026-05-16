@@ -7,7 +7,7 @@ import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { colors, spacing, borderRadius, fonts } from '../theme';
 import { supabase } from '../lib/supabase';
-import { getProfile } from '../services/profiles';
+import { getProfile, deleteMyAccount } from '../services/profiles';
 import type { DbProfile, ProfileStackParamList } from '../types';
 
 type Props = NativeStackScreenProps<ProfileStackParamList, 'Profile'>;
@@ -59,6 +59,45 @@ export default function ProfileScreen({ navigation }: Props) {
     ]);
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account',
+      'This will permanently delete your account and all your kicks, sessions, and profile data. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            // Second confirmation — destructive + irreversible warrants two taps.
+            Alert.alert(
+              'Are you absolutely sure?',
+              'Your account will be erased immediately. Type DELETE in your head and tap below to confirm.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Permanently Delete',
+                  style: 'destructive',
+                  onPress: async () => {
+                    const { error } = await deleteMyAccount();
+                    if (error) {
+                      Alert.alert('Delete failed', error.message);
+                      return;
+                    }
+                    // Sign out to clear local session + tokens. The DB row is
+                    // already gone, so supabase will detect the invalid session
+                    // and route the user back to login.
+                    await supabase.auth.signOut();
+                  },
+                },
+              ],
+            );
+          },
+        },
+      ],
+    );
+  };
+
   const initial = (profile?.username ?? 'K')[0].toUpperCase();
 
   return (
@@ -103,12 +142,17 @@ export default function ProfileScreen({ navigation }: Props) {
 
         {/* About */}
         <Text style={styles.sectionLabel}>ABOUT</Text>
-        <InfoRow label="Version" value="0.0.1" />
+        <InfoRow label="Version" value="1.0.0" />
         <InfoRow label="AI Model" value="MediaPipe Pose" />
 
         {/* Sign Out */}
         <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut} activeOpacity={0.85}>
           <Text style={styles.signOutText}>SIGN OUT</Text>
+        </TouchableOpacity>
+
+        {/* Delete Account — destructive, distinct from Sign Out */}
+        <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAccount} activeOpacity={0.7}>
+          <Text style={styles.deleteText}>DELETE ACCOUNT</Text>
         </TouchableOpacity>
 
         <View style={{ height: spacing.xxl }} />
@@ -207,5 +251,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.white,
     letterSpacing: 1,
+  },
+
+  deleteButton: {
+    backgroundColor: 'transparent',
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.error,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: spacing.md,
+  },
+  deleteText: {
+    fontFamily: fonts.montserratBold,
+    fontSize: 13,
+    color: colors.error,
+    letterSpacing: 1.5,
   },
 });

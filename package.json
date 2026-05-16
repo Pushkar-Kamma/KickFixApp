@@ -15,6 +15,7 @@
     "@react-navigation/bottom-tabs": "^6.6.1",
     "@react-navigation/native": "^6.1.18",
     "@react-navigation/native-stack": "^6.11.0",
+    "@sentry/react-native": "^8.11.1",
     "@supabase/supabase-js": "^2.103.2",
     "@thinksys/react-native-mediapipe": "^0.0.19",
     "react": "18.3.1",
@@ -45,6 +46,7 @@
     "prettier": "2.8.8",
     "react-native-dotenv": "^3.4.11",
     "react-test-renderer": "18.3.1",
+    "sharp": "^0.34.5",
     "typescript": "5.0.4"
   },
   "engines": {

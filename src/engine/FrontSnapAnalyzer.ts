@@ -115,8 +115,17 @@ export function analyzeFrontSnap(frames: PoseFrame[], leg: 'Left' | 'Right'): Ki
   }
 
   // Phase indices ---------------------------------------------------------
-  // peak knee extension = max of kneeAngles
-  const peakIdx = argmax(kneeAngles);
+  // Peak frame = the frame where the KICKING ankle was highest on screen
+  // (smallest image-Y). More reliable than knee-angle argmax because the
+  // leg can be straighter at standing-rest than at peak kick extension.
+  let peakIdx = 0;
+  {
+    let minY = Infinity;
+    for (let i = 0; i < N; i++) {
+      const y = frames[i].image[ji.kAnkle].y;
+      if (y < minY) { minY = y; peakIdx = i; }
+    }
+  }
   // chamber peak = min of kneeAngles BEFORE peakIdx (most folded)
   let chamberIdx = 0;
   let chamberMin = Infinity;
