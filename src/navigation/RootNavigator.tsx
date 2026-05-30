@@ -10,6 +10,7 @@ import { ProfileSetupScreen } from '../screens';
 import type { RootStackParamList } from '../types';
 import { colors } from '../theme';
 import { supabase } from '../lib/supabase';
+import { ensureAnonSession } from '../lib/anonAuth';
 import { getProfile } from '../services/profiles';
 import type { Session } from '@supabase/supabase-js';
 
@@ -47,13 +48,20 @@ export default function RootNavigator() {
         const cached = await EncryptedStorage.getItem(HAS_PROFILE_KEY).catch(() => null);
         if (isMounted && cached === '1') setHasProfile(true);
 
-        const { data } = await supabase.auth.getSession();
+        // Testing build: if no session, create an anonymous user + default profile.
+        // Falls through to AuthStack only if anon sign-in fails (e.g. Supabase down).
+        let s = (await supabase.auth.getSession()).data.session ?? null;
+        if (!s) {
+          s = await ensureAnonSession();
+        }
         if (!isMounted) return;
-        const s = data.session ?? null;
         setSession(s);
 
         // Refresh profile in background — do NOT await, don't block render.
-        if (s?.user) refreshProfile(s.user.id);
+        if (s?.user) {
+          setHasProfile(true);
+          refreshProfile(s.user.id);
+        }
       } catch {
         if (!isMounted) return;
         setSession(null);
