@@ -87,7 +87,8 @@ export default function ProfileSetupScreen({ onComplete }: { onComplete: () => v
 
     // Hard timeout — if any Supabase call hangs (network, RLS, etc) the user
     // gets an error instead of being stuck with a permanently grey button.
-    const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> =>
+    // Accept PromiseLike so Supabase query builders (thenables) type-check.
+    const withTimeout = <T,>(p: PromiseLike<T>, ms: number, label: string): Promise<T> =>
       Promise.race([
         p,
         new Promise<T>((_, reject) =>

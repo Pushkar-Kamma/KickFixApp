@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  StyleSheet, View, Text, TouchableOpacity, ScrollView, StatusBar, Alert,
+  StyleSheet, View, Text, TouchableOpacity, ScrollView, StatusBar, Alert, Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
@@ -11,6 +11,23 @@ import { getProfile, deleteMyAccount } from '../services/profiles';
 import type { DbProfile, ProfileStackParamList } from '../types';
 
 type Props = NativeStackScreenProps<ProfileStackParamList, 'Profile'>;
+
+// App / support constants
+const APP_VERSION = '1.0.3';
+const FEEDBACK_EMAIL = 'dojo@kickfix.edstart.xyz';
+const PRIVACY_URL = 'https://pushkar-kamma.github.io/KickFixApp/privacy-policy.html';
+const PLAY_URL = 'https://play.google.com/store/apps/details?id=app.KickFix';
+const PLAY_MARKET_URL = 'market://details?id=app.KickFix';
+
+async function openUrl(url: string, fallback?: string) {
+  try {
+    await Linking.openURL(url);
+  } catch {
+    if (fallback) {
+      try { await Linking.openURL(fallback); } catch { /* nothing we can do */ }
+    }
+  }
+}
 
 function InfoRow({ label, value, onEdit }: { label: string; value: string; onEdit?: () => void }) {
   return (
@@ -24,6 +41,16 @@ function InfoRow({ label, value, onEdit }: { label: string; value: string; onEdi
         <Text style={styles.infoValue}>{value}</Text>
         {onEdit && <Text style={styles.editChevron}>›</Text>}
       </View>
+    </TouchableOpacity>
+  );
+}
+
+// Tappable row for links/actions (no value, just label + chevron).
+function ActionRow({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={styles.infoRow} onPress={onPress} activeOpacity={0.6}>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.editChevron}>›</Text>
     </TouchableOpacity>
   );
 }
@@ -100,6 +127,16 @@ export default function ProfileScreen({ navigation }: Props) {
 
   const initial = (profile?.username ?? 'K')[0].toUpperCase();
 
+  const handleSendFeedback = () => {
+    openUrl(`mailto:${FEEDBACK_EMAIL}?subject=KickFix%20Feedback`);
+  };
+  const handleRate = () => {
+    openUrl(PLAY_MARKET_URL, PLAY_URL);
+  };
+  const handlePrivacy = () => {
+    openUrl(PRIVACY_URL);
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.background} />
@@ -140,9 +177,15 @@ export default function ProfileScreen({ navigation }: Props) {
         <Text style={styles.sectionLabel}>PREFERENCES</Text>
         <InfoRow label="Training Preference" value="Kicks" />
 
+        {/* Support */}
+        <Text style={styles.sectionLabel}>SUPPORT</Text>
+        <ActionRow label="Send Feedback" onPress={handleSendFeedback} />
+        <ActionRow label="Rate KickFix" onPress={handleRate} />
+        <ActionRow label="Privacy Policy" onPress={handlePrivacy} />
+
         {/* About */}
         <Text style={styles.sectionLabel}>ABOUT</Text>
-        <InfoRow label="Version" value="1.0.0" />
+        <InfoRow label="Version" value={APP_VERSION} />
         <InfoRow label="AI Model" value="MediaPipe Pose" />
 
         {/* Sign Out */}

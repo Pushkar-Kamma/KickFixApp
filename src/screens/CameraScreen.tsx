@@ -11,10 +11,11 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
-  StyleSheet, View, Dimensions, Text, TouchableOpacity, StatusBar, InteractionManager, ScrollView,
+  StyleSheet, View, Dimensions, Text, TouchableOpacity, StatusBar, InteractionManager, ScrollView, Vibration,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RNMediapipe } from '@thinksys/react-native-mediapipe';
+import EncryptedStorage from 'react-native-encrypted-storage';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { colors, spacing, borderRadius, fonts } from '../theme';
 import type { TrainStackParamList, KickMode, EngineData } from '../types';
@@ -58,6 +59,19 @@ const POST_END_TRAIL_FRAMES = 10;
 /** Hard safety cap on buffer length (~4s at 30fps). */
 const MAX_KICK_FRAMES = 120;
 
+// Haptic patterns (ms). Built-in Vibration API — no native dependency.
+// Wrapped so a device without a vibrator never throws.
+const HAPTIC_GOOD = 55;                 // solid single pulse: counted, strong kick
+const HAPTIC_OK = 30;                    // light single pulse: counted, weaker kick
+const HAPTIC_REJECT = [0, 25, 70, 25];  // double tap: ignored / low-quality
+function buzz(pattern: number | number[]) {
+  try { Vibration.vibrate(pattern as number); } catch { /* device has no vibrator */ }
+}
+
+// One-time positioning guide shown on first entry to the camera. Persisted so
+// it doesn't nag returning users; reachable again via the "?" button in the HUD.
+const CAMERA_GUIDE_KEY = 'kickfix.seenCameraGuide';
+
 export default function CameraScreen({ route, navigation }: Props) {
   const kickMode: KickMode = route.params?.kickMode ?? 'Front Snap';
   const analysisMode = route.params?.analysisMode ?? 'Quick';
@@ -73,6 +87,9 @@ export default function CameraScreen({ route, navigation }: Props) {
   const [phase, setPhase] = useState<Phase>('IDLE');
   const [criteria, setCriteria] = useState<CriterionResult[]>([]);
   const showDebug = false;
+
+  // First-run positioning guide overlay.
+  const [showGuide, setShowGuide] = useState(false);
 
   // Refs (transient state — no re-render)
   const phaseRef = useRef<Phase>('IDLE');
@@ -109,10 +126,21 @@ export default function CameraScreen({ route, navigation }: Props) {
     noticeTimer.current = setTimeout(() => setNotice(''), ms);
   }, []);
 
+  // Show the positioning guide on first ever entry to the camera.
+  useEffect(() => {
+    EncryptedStorage.getItem(CAMERA_GUIDE_KEY)
+      .then(seen => { if (!seen) setShowGuide(true); })
+      .catch(() => { /* storage unavailable — just skip the guide */ });
+  }, []);
+
+  const dismissGuide = useCallback(() => {
+    setShowGuide(false);
+    EncryptedStorage.setItem(CAMERA_GUIDE_KEY, '1').catch(() => {});
+  }, []);
+
   /* ── Permission + session lifecycle ── */
   useEffect(() => {
     requestCameraPermission().then(setHasPermission);
-
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
@@ -166,6 +194,7 @@ export default function CameraScreen({ route, navigation }: Props) {
       // to local telemetry so we can later evaluate whether the threshold
       // is too aggressive (rejected real kicks) or too loose (passed noise).
       if (result.score < 45) {
+        buzz(HAPTIC_REJECT);
         bumpTelemetry(userId.current, 'rejectedKicks').catch(() => {});
         flashNotice(`Ignored — low quality kick (${result.score}/100).`);
         return;
@@ -173,6 +202,8 @@ export default function CameraScreen({ route, navigation }: Props) {
 
       totalKicks.current += 1;
       const passed = result.score >= 70;
+      // Tactile confirmation that the kick was captured + counted.
+      buzz(passed ? HAPTIC_GOOD : HAPTIC_OK);
       if (passed) {
         goodKicks.current += 1;
         curStreak.current += 1;
@@ -428,6 +459,13 @@ export default function CameraScreen({ route, navigation }: Props) {
             <Text style={styles.subModeText}>{analysisMode.toUpperCase()}</Text>
           </View>
           <View style={styles.topRight}>
+            <TouchableOpacity
+              style={styles.helpBtn}
+              onPress={() => setShowGuide(true)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              activeOpacity={0.7}>
+              <Text style={styles.helpBtnText}>?</Text>
+            </TouchableOpacity>
             <Text style={styles.fpsText}>{fps} fps</Text>
             <Text style={styles.kicksText}>{kickCount} kicks</Text>
           </View>
@@ -492,12 +530,85 @@ export default function CameraScreen({ route, navigation }: Props) {
           <Text style={styles.endBtnText}>END SESSION</Text>
         </TouchableOpacity>
       </View>
+
+      {/* First-run positioning guide — helps testers frame their kicks. */}
+      {showGuide && (
+        <View style={styles.guideOverlay}>
+          <View style={styles.guideCard}>
+            <Text style={styles.guideTitle}>GET A CLEAN READ</Text>
+            <View style={styles.guideRow}>
+              <Text style={styles.guideBullet}>1</Text>
+              <Text style={styles.guideText}>Prop your phone up so your whole body fits in frame.</Text>
+            </View>
+            <View style={styles.guideRow}>
+              <Text style={styles.guideBullet}>2</Text>
+              <Text style={styles.guideText}>Stand back about 6 to 8 feet (2 to 2.5 m).</Text>
+            </View>
+            <View style={styles.guideRow}>
+              <Text style={styles.guideBullet}>3</Text>
+              <Text style={styles.guideText}>Turn side-on so the camera sees your kicking leg.</Text>
+            </View>
+            <View style={styles.guideRow}>
+              <Text style={styles.guideBullet}>4</Text>
+              <Text style={styles.guideText}>Make sure the area is well lit, then kick.</Text>
+            </View>
+            <TouchableOpacity style={styles.guideBtn} onPress={dismissGuide} activeOpacity={0.85}>
+              <Text style={styles.guideBtnText}>GOT IT</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.black },
+
+  // Help button (HUD) + first-run positioning guide overlay
+  helpBtn: {
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.6)',
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: spacing.xs,
+  },
+  helpBtnText: {
+    fontFamily: fonts.montserratBold, fontSize: 15, color: colors.white, lineHeight: 18,
+  },
+  guideOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.82)',
+    alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: spacing.xl, zIndex: 50,
+  },
+  guideCard: {
+    width: '100%', backgroundColor: colors.card,
+    borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colors.cardBorder,
+    padding: spacing.xl,
+  },
+  guideTitle: {
+    fontFamily: fonts.montserratBlack, fontSize: 20, color: colors.white,
+    letterSpacing: 1, marginBottom: spacing.lg, textAlign: 'center',
+  },
+  guideRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: spacing.md },
+  guideBullet: {
+    fontFamily: fonts.montserratBlack, fontSize: 15, color: colors.accent,
+    width: 24, height: 24, borderRadius: 12, textAlign: 'center', lineHeight: 24,
+    backgroundColor: 'rgba(229,57,53,0.15)', marginRight: spacing.md, overflow: 'hidden',
+  },
+  guideText: {
+    flex: 1, fontFamily: fonts.interRegular, fontSize: 15, color: colors.textSecondary,
+    lineHeight: 22,
+  },
+  guideBtn: {
+    backgroundColor: colors.primary, borderRadius: borderRadius.md,
+    paddingVertical: 14, alignItems: 'center', marginTop: spacing.md,
+  },
+  guideBtnText: {
+    fontFamily: fonts.montserratBold, fontSize: 15, color: colors.white, letterSpacing: 1,
+  },
+
   permissionContainer: {
     flex: 1, backgroundColor: colors.background,
     justifyContent: 'center', alignItems: 'center', paddingHorizontal: spacing.xl,
