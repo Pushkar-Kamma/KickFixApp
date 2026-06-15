@@ -81,3 +81,8 @@ yarn-error.log
 
 # Local-only release signing credentials
 android/gradle.properties.local
+
+# Local-only working artifacts (not part of the app)
+chat.json
+app.KickFix_feedback.pdf
+_*.txt
