@@ -7,13 +7,14 @@ import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { colors, spacing, borderRadius, fonts } from '../theme';
 import { supabase } from '../lib/supabase';
+import { replayWalkthrough } from '../lib/walkthrough';
 import { getProfile, deleteMyAccount } from '../services/profiles';
 import type { DbProfile, ProfileStackParamList } from '../types';
 
 type Props = NativeStackScreenProps<ProfileStackParamList, 'Profile'>;
 
 // App / support constants
-const APP_VERSION = '1.0.3';
+const APP_VERSION = '1.0.4';
 const FEEDBACK_EMAIL = 'dojo@kickfix.edstart.xyz';
 const PRIVACY_URL = 'https://pushkar-kamma.github.io/KickFixApp/privacy-policy.html';
 const PLAY_URL = 'https://play.google.com/store/apps/details?id=app.KickFix';
@@ -136,6 +137,9 @@ export default function ProfileScreen({ navigation }: Props) {
   const handlePrivacy = () => {
     openUrl(PRIVACY_URL);
   };
+  const handleReplayTutorial = () => {
+    replayWalkthrough();
+  };
 
   return (
     <View style={styles.container}>
@@ -179,6 +183,7 @@ export default function ProfileScreen({ navigation }: Props) {
 
         {/* Support */}
         <Text style={styles.sectionLabel}>SUPPORT</Text>
+        <ActionRow label="Replay Tutorial" onPress={handleReplayTutorial} />
         <ActionRow label="Send Feedback" onPress={handleSendFeedback} />
         <ActionRow label="Rate KickFix" onPress={handleRate} />
         <ActionRow label="Privacy Policy" onPress={handlePrivacy} />

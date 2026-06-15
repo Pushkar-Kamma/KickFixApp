@@ -4,6 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import HomeStack from './HomeStack';
 import TrainStack from './TrainStack';
 import ProfileStack from './ProfileStack';
+import Walkthrough from '../components/Walkthrough';
 import { colors, spacing, fonts } from '../theme';
 import type { MainTabParamList } from '../types';
 
@@ -81,38 +82,44 @@ function TabItem({ name, focused, IconComponent }: {
 
 export default function AppTabs() {
   return (
-    <Tab.Navigator
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle: styles.tabBar,
-        tabBarShowLabel: false,
-      }}>
-      <Tab.Screen
-        name="Home"
-        component={HomeStack}
-        options={{
-          tabBarIcon: ({ focused }) => <TabItem name="Home" focused={focused} IconComponent={HomeIcon} />,
-        }}
-      />
-      <Tab.Screen
-        name="Train"
-        component={TrainStack}
-        options={{
-          tabBarIcon: ({ focused }) => <TabItem name="Train" focused={focused} IconComponent={TrainIcon} />,
-        }}
-      />
-      <Tab.Screen
-        name="ProfileTab"
-        component={ProfileStack}
-        options={{
-          tabBarIcon: ({ focused }) => <TabItem name="Profile" focused={focused} IconComponent={ProfileIcon} />,
-        }}
-      />
-    </Tab.Navigator>
+    <View style={styles.root}>
+      <Tab.Navigator
+        screenOptions={{
+          headerShown: false,
+          tabBarStyle: styles.tabBar,
+          tabBarShowLabel: false,
+        }}>
+        <Tab.Screen
+          name="Home"
+          component={HomeStack}
+          options={{
+            tabBarIcon: ({ focused }) => <TabItem name="Home" focused={focused} IconComponent={HomeIcon} />,
+          }}
+        />
+        <Tab.Screen
+          name="Train"
+          component={TrainStack}
+          options={{
+            tabBarIcon: ({ focused }) => <TabItem name="Train" focused={focused} IconComponent={TrainIcon} />,
+          }}
+        />
+        <Tab.Screen
+          name="ProfileTab"
+          component={ProfileStack}
+          options={{
+            tabBarIcon: ({ focused }) => <TabItem name="Profile" focused={focused} IconComponent={ProfileIcon} />,
+          }}
+        />
+      </Tab.Navigator>
+      <Walkthrough />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   tabBar: {
     backgroundColor: colors.tabBarBackground,
     borderTopColor: colors.tabBarBorder,
