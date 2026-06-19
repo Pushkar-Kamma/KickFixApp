@@ -2,6 +2,13 @@
     <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
         <!-- Customize your theme here. -->
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+        <!-- System bar colors set via theme instead of deprecated runtime APIs
+             (Window.setStatusBarColor / setNavigationBarColor). On Android 15
+             (SDK 35) the app is edge-to-edge and these are ignored; on Android
+             10-14 they keep the bars black to match the app background. -->
+        <item name="android:statusBarColor">@color/system_bar</item>
+        <item name="android:navigationBarColor">@color/system_bar</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 
     <style name="BootTheme" parent="Theme.BootSplash">
