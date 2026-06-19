@@ -41,7 +41,7 @@ export default function WelcomeScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      <StatusBar barStyle="light-content" />
       <ScrollView
         contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.lg }]}
         showsVerticalScrollIndicator={false}

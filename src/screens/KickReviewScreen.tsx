@@ -130,7 +130,7 @@ export default function KickReviewScreen({ route, navigation }: Props) {
   if (loading) {
     return (
       <View style={[styles.container, styles.center]}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+        <StatusBar barStyle="light-content" />
         <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
@@ -138,7 +138,7 @@ export default function KickReviewScreen({ route, navigation }: Props) {
   if (!frames.length || !result) {
     return (
       <View style={[styles.container, styles.center]}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+        <StatusBar barStyle="light-content" />
         <Text style={styles.errorText}>Unable to load kick replay.</Text>
         <TouchableOpacity style={styles.nextBtn} onPress={() => navigation.goBack()}>
           <Text style={styles.nextBtnText}>BACK</Text>
@@ -153,7 +153,7 @@ export default function KickReviewScreen({ route, navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.md, paddingBottom: insets.bottom + spacing.lg }]}>
 
         {/* Header */}

@@ -426,7 +426,7 @@ export default function CameraScreen({ route, navigation }: Props) {
   if (!hasPermission) {
     return (
       <View style={styles.permissionContainer}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+        <StatusBar barStyle="light-content" />
         <Text style={styles.permissionTitle}>Camera Access Required</Text>
         <Text style={styles.permissionBody}>
           KickFix needs camera access to analyze your kicks in real-time.
@@ -437,7 +437,7 @@ export default function CameraScreen({ route, navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
+      <StatusBar translucent barStyle="light-content" />
 
       <RNMediapipe
         width={width}

@@ -115,7 +115,7 @@ export default function Walkthrough() {
 
   return (
     <View style={styles.overlay}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      <StatusBar barStyle="light-content" />
 
       {/* Skip */}
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>

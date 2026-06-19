@@ -12,7 +12,7 @@ export default function PasswordUpdatedScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      <StatusBar barStyle="light-content" />
       <View style={[styles.content, { paddingTop: insets.top + spacing.xxl }]}>
         <View style={styles.logoRow}>
           <Image
