@@ -14,7 +14,7 @@ import type { DbProfile, ProfileStackParamList } from '../types';
 type Props = NativeStackScreenProps<ProfileStackParamList, 'Profile'>;
 
 // App / support constants
-const APP_VERSION = '1.0.4';
+const APP_VERSION = '1.0.5';
 const FEEDBACK_EMAIL = 'dojo@kickfix.edstart.xyz';
 const PRIVACY_URL = 'https://pushkar-kamma.github.io/KickFixApp/privacy-policy.html';
 const PLAY_URL = 'https://play.google.com/store/apps/details?id=app.KickFix';
