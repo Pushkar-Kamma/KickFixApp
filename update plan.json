@@ -1,0 +1,68 @@
+{
+  "project": "KickFix",
+  "package": "app.KickFix",
+  "activeBranch": "KickFix_Without_Login",
+  "productionBranch": "main",
+  "lastUpdated": "2026-06-28",
+  "note": "Roadmap from tester-feedback split. Work happens directly on KickFix_Without_Login (no-login testing fork). main holds the real-login lineage and is stale at versionCode 2 / 1.0.1.",
+  "done": [
+    {
+      "id": "update-1",
+      "title": "Polish + guidance + feedback loop",
+      "commit": "5bffd2f",
+      "items": ["haptics on kick capture (built-in Vibration)", "first-run camera positioning guide", "Profile: Send Feedback / Rate KickFix / Privacy Policy"],
+      "status": "shipped"
+    },
+    {
+      "id": "update-2",
+      "title": "Onboarding walkthrough",
+      "commit": "0471e03",
+      "items": ["first-launch 4-slide carousel + Skip", "Profile: Replay Tutorial"],
+      "droppedFromScope": ["score count-up animation"],
+      "status": "shipped"
+    },
+    {
+      "id": "compat-update",
+      "title": "Platform compatibility (partial)",
+      "commits": ["8d44545", "3e79860", "200f90e"],
+      "items": ["system bar colors via theme XML", "removed deprecated StatusBar backgroundColor (24 sites)", "versionCode 6 / 1.0.5"],
+      "status": "built+pushed, not yet uploaded"
+    },
+    {
+      "id": "guest-or-account",
+      "title": "Guest + account model",
+      "items": ["Welcome: Continue as Guest (anon) or Sign In/Create", "RootNav no longer auto-anon", "Profile shows guest CTA", "guest->permanent upgrade via updateUser (keeps uid+data)"],
+      "supabase": "Anonymous sign-ins must be enabled (toggle); email already on",
+      "versionBump": "7 / 1.0.6",
+      "status": "built+pushed, not yet uploaded"
+    }
+  ],
+  "upcoming": [
+    {
+      "id": "update-3",
+      "title": "Voice feedback",
+      "priority": "next",
+      "details": "Offline TTS (react-native-tts). Settings: Off / Score / Score+cue / Full. Interrupt-and-speak-latest to avoid lag on rapid kicks. Replaced Google Sign-In on the roadmap.",
+      "status": "not-built"
+    },
+    {
+      "id": "rn-upgrade",
+      "title": "React Native 0.75 -> 0.77+ upgrade",
+      "priority": "do-with-user-on-device",
+      "rationale": "ONLY way to clear 16KB page warning (52/57 native libs are RN0.75 prebuilts; MediaPipe already 16K) and fully clear edge-to-edge/deprecated-API warnings. NDK bump alone won't re-align prebuilt Hermes. High risk to camera.",
+      "status": "not-built"
+    },
+    {
+      "id": "google-signin",
+      "title": "Google Sign-In",
+      "priority": "post-launch on main",
+      "details": "Needs Google Cloud OAuth client + Play App Signing SHA-1 + Supabase provider. Invisible in anon testing build.",
+      "status": "deferred"
+    }
+  ],
+  "knownIssues": [
+    "App.test.tsx fails: jest can't transpile @sentry/react-native ESM (pre-existing, 26 logic tests pass)",
+    "Play warnings persist post-compat: edge-to-edge + deprecated APIs from libs (react-native-screens, RN core, material) + 16KB - cleared by rn-upgrade",
+    "next Play upload must be versionCode >= 7"
+  ]
+}

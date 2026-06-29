@@ -8,10 +8,13 @@ import {
   Image,
   ScrollView,
   Dimensions,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { colors, spacing, borderRadius, fonts } from '../theme';
+import { ensureAnonSession } from '../lib/anonAuth';
 import type { AuthStackParamList } from '../types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Welcome'>;
@@ -39,6 +42,16 @@ export default function WelcomeScreen({ navigation }: Props) {
 
   const current = QUOTES[quoteIndex];
 
+  const [guestLoading, setGuestLoading] = useState(false);
+  const handleGuest = async () => {
+    setGuestLoading(true);
+    const session = await ensureAnonSession();
+    if (!session) {
+      setGuestLoading(false);
+      Alert.alert('Could not start', 'Unable to start a guest session. Check your connection and try again.');
+    }
+    // On success, RootNavigator's auth listener routes into the app.
+  };
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -81,6 +94,16 @@ export default function WelcomeScreen({ navigation }: Props) {
             activeOpacity={0.85}>
             <Text style={styles.secondaryButtonText}>LOGIN</Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.guestButton}
+            onPress={handleGuest}
+            disabled={guestLoading}
+            activeOpacity={0.7}>
+            {guestLoading
+              ? <ActivityIndicator color={colors.textMuted} />
+              : <Text style={styles.guestButtonText}>Continue as Guest</Text>}
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </View>
@@ -117,6 +140,17 @@ const styles = StyleSheet.create({
     color: colors.primary,
     marginTop: spacing.xs,
     textAlign: 'center',
+  },
+  guestButton: {
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    marginTop: spacing.sm,
+  },
+  guestButtonText: {
+    fontFamily: fonts.interMedium,
+    fontSize: 14,
+    color: colors.textMuted,
+    textDecorationLine: 'underline',
   },
 
   logoSection: {

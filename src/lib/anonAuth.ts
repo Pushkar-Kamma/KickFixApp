@@ -11,7 +11,7 @@ const DEFAULT_HEIGHT_CM = 170;
 
 function randomTesterUsername(): string {
   const n = Math.floor(1000 + Math.random() * 9000);
-  return `Tester ${n}`;
+  return `Guest ${n}`;
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {

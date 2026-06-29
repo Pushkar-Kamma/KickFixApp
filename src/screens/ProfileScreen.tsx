@@ -14,7 +14,7 @@ import type { DbProfile, ProfileStackParamList } from '../types';
 type Props = NativeStackScreenProps<ProfileStackParamList, 'Profile'>;
 
 // App / support constants
-const APP_VERSION = '1.0.5';
+const APP_VERSION = '1.0.6';
 const FEEDBACK_EMAIL = 'dojo@kickfix.edstart.xyz';
 const PRIVACY_URL = 'https://pushkar-kamma.github.io/KickFixApp/privacy-policy.html';
 const PLAY_URL = 'https://play.google.com/store/apps/details?id=app.KickFix';
@@ -61,11 +61,13 @@ export default function ProfileScreen({ navigation }: Props) {
   const isFocused = useIsFocused();
   const [profile, setProfile] = useState<DbProfile | null>(null);
   const [email, setEmail] = useState('');
+  const [isGuest, setIsGuest] = useState(false);
 
   const loadProfile = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) return;
     setEmail(session.user.email ?? '');
+    setIsGuest(session.user.is_anonymous === true);
     const { data } = await getProfile(session.user.id);
     if (data) setProfile(data);
   }, []);
@@ -156,8 +158,18 @@ export default function ProfileScreen({ navigation }: Props) {
             <Text style={styles.avatarText}>{initial}</Text>
           </View>
           <Text style={styles.username}>{profile?.username ?? 'Fighter'}</Text>
-          <Text style={styles.email}>{email}</Text>
+          <Text style={styles.email}>{isGuest ? 'Guest account' : email}</Text>
         </View>
+
+        {isGuest && (
+          <TouchableOpacity
+            style={styles.upgradeCard}
+            onPress={() => navigation.navigate('CreateAccount')}
+            activeOpacity={0.85}>
+            <Text style={styles.upgradeTitle}>Create an account</Text>
+            <Text style={styles.upgradeSub}>Save your progress and use it on any device. Your kicks stay.</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Account */}
         <Text style={styles.sectionLabel}>ACCOUNT</Text>
@@ -212,6 +224,13 @@ export default function ProfileScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { paddingHorizontal: spacing.lg },
+
+  upgradeCard: {
+    backgroundColor: colors.primaryTint, borderWidth: 1, borderColor: colors.primaryTintBorder,
+    borderRadius: borderRadius.md, padding: spacing.md, marginBottom: spacing.md,
+  },
+  upgradeTitle: { fontFamily: fonts.montserratBold, fontSize: 16, color: colors.white, marginBottom: 2 },
+  upgradeSub: { fontFamily: fonts.interRegular, fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
 
   pageTitle: {
     fontFamily: fonts.montserratExtraBold,

@@ -18,3 +18,4 @@ export { default as TrainSelectScreen } from './TrainSelectScreen';
 export { default as KickReviewScreen } from './KickReviewScreen';
 export { default as EditUsernameScreen } from './EditUsernameScreen';
 export { default as EditProfileScreen } from './EditProfileScreen';
+export { default as CreateAccountScreen } from './CreateAccountScreen';
