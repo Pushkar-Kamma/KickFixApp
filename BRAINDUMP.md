@@ -34,7 +34,9 @@
 | — | Built `segmentation.ts` (5-phase + fallbacks) | 99851df | tests |
 | — | 27 unit tests (filters/gate/segmentation) | 99851df | 27/27 pass |
 | — | Wired gate into `CameraScreen` behind flag + `modeConfusions` telemetry | 54814b4 | tsc + 53 tests + release AAB |
-| — | This brain-dump + engagement engine | (pending) | — |
+| — | Brain-dump + pure engagement engine (XP/streak/goals) + 17 tests | 5a8b1eb | tsc + 17 tests |
+| — | **Implementation audit** (Opus 4.8) of the actual engine code — 3 majors + 6 minors | — | findings in session memory |
+| — | Fixed all majors (redirect-scores-not-discards, chamber garbage-feature, freeze over-consumption) + cheap minors; strengthened tests | b3a0e98 | tsc + 77 tests + release AAB |
 
 **Rule:** each engine module is *pure* (no React/Native imports) so it unit-tests without a device and can be reviewed by agents.
 
@@ -143,6 +145,8 @@ Goal: make daily practice *inevitable and joyful* without dark patterns or punis
 5. Verify **fps invariance** (same clip at 15/24/30/60 → same identity, score Δ ≤ ~3).
 6. Flip `TECHNIQUE_GATE_ENABLED = true`; device soak-test the accept/redirect UX.
 7. Then add **redirect one-tap re-score** UI (all three analyzers already exist).
+
+> **Calibration insight from the code audit:** the **side-kick shin prior** (`PRIORS.shin.c = 45°` from horizontal, expecting a steep shin) is likely **too steep** — a fully-extended side kick has a near-*horizontal* shin. On the synthetic side-like fixture the gate ranks Side highest but isn't confident enough to auto-redirect because the shin term is penalized. Revisit the per-technique shin priors (and consider making shin a weak/secondary discriminator vs hip-rotation + trajectory) during calibration. This is a threshold tune, not a logic change.
 
 ---
 
