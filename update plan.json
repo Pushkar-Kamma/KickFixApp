@@ -3,7 +3,7 @@
   "package": "app.KickFix",
   "activeBranch": "KickFix_Without_Login",
   "productionBranch": "main",
-  "lastUpdated": "2026-06-28",
+  "lastUpdated": "2026-07-14",
   "note": "Roadmap from tester-feedback split. Work happens directly on KickFix_Without_Login (no-login testing fork). main holds the real-login lineage and is stale at versionCode 2 / 1.0.1.",
   "done": [
     {
@@ -42,7 +42,7 @@
       "id": "update-3",
       "title": "Voice feedback",
       "priority": "next",
-      "details": "Offline TTS (react-native-tts). Settings: Off / Score / Score+cue / Full. Interrupt-and-speak-latest to avoid lag on rapid kicks. Replaced Google Sign-In on the roadmap.",
+      "details": "Offline TTS. Settings: Off / Score / Score+cue / Full. Use typed channels: ordered instructions are non-droppable; corrections replace only older corrections for the same step; rapid-kick scores use latest-only. Camera observation opens only after the instruction finishes plus a short reaction guard. Replaced Google Sign-In on the roadmap.",
       "status": "not-built"
     },
     {
@@ -60,9 +60,193 @@
       "status": "deferred"
     }
   ],
+  "futureVision": {
+    "goal": "Evolve KickFix from a single-kick analyzer into a general martial-arts coaching platform for individual techniques, combinations, and complete forms/patterns.",
+    "principles": [
+      "Build and validate single techniques before combining them into sequences.",
+      "Separate movement detection/segmentation from biomechanical scoring.",
+      "Represent techniques and sequences as data-driven definitions instead of duplicating analyzer code.",
+      "Give one prioritized correction at a time; do not overwhelm beginners.",
+      "Use body-relative spatial thresholds and timestamp-based temporal thresholds.",
+      "Never claim pose landmarks measure impact force, muscle activation, or hidden joint rotation directly.",
+      "Design around one-camera limits: occlusion, turns away from camera, mirrored front camera, variable FPS, and incomplete landmarks."
+    ],
+    "foundationArchitecture": {
+      "movementPrimitive": {
+        "definition": "A versioned semantic technique that references separate detector, scorer, and cue-set definitions; detection and scoring must not be coupled.",
+        "requiredFields": ["primitiveId", "definitionVersion", "category", "anatomicalSidePolicy", "stancePolicy", "supportedViews", "orientationRequirements", "requiredEndpoint", "detectorRef", "scorerRef", "cueSetRef"],
+        "prohibitedMeasurements": ["impact force", "muscle activation", "hidden joint rotation", "fist rotation from BlazePose", "absolute physical speed from monocular depth", "contact with an unseen target"]
+      },
+      "primitiveEvent": {
+        "definition": "The stable contract emitted by a streaming detector and consumed by sequence and scoring engines.",
+        "requiredFields": ["attemptId", "primitiveId", "anatomicalSide", "stanceBefore", "stanceAfter", "startedAtMonotonicMs", "committedAtMonotonicMs", "endedAtMonotonicMs", "completionStatus", "movementConfidence", "poseCoverage", "orientationAtStart", "orientationAtEnd", "evidenceWindowRef"],
+        "completionStatuses": ["completed", "incomplete", "aborted", "uncertain", "tracking_lost", "unsupported_view"]
+      },
+      "sequenceEngine": {
+        "definition": "A monotonic-timestamp state machine that consumes committed primitive events, handles overlap/repetition, validates transitions, and rejects stale async results.",
+        "requiredPolicies": ["candidate hysteresis before commit", "timestamp-based debounce/refractory windows", "same-primitive repetition", "overlap ownership", "wrong/extra/missing move handling", "timeout ownership", "tracking suspension", "explicit resynchronization", "session-generation tokens"]
+      },
+      "guidedCoach": {
+        "definition": "A deterministic voice/visual controller that coordinates cue completion, observation gates, confidence, endpoint holds, retries, pause/resume, and camera reacquisition.",
+        "retryPolicy": "After two unsuccessful retries, offer repeat demonstration, adjust camera, retry, skip, or end; uncertainty is not failure."
+      },
+      "sharedResult": {
+        "attemptStatuses": ["passed", "failed", "uncertain", "incomplete", "tracking_lost", "unsupported_view", "skipped"],
+        "criterionStatuses": ["pass", "fail", "unobservable", "not_applicable"],
+        "scoreRule": "Emit a numeric score only when observable weighted coverage meets the scorer's minimum; missing evidence never deducts points.",
+        "compatibilityRule": "Keep existing kicks/kick_frames unchanged and adapt them for generalized reads; never insert punches, blocks, combos, or forms into kicks."
+      },
+      "confidencePolicy": {
+        "dimensions": ["poseQuality per required landmark", "orientationConfidence", "movementConfidence", "completionConfidence", "scoreCoverage"],
+        "rules": ["A criterion may fail only when its evidence is observable.", "Low confidence becomes uncertain/tracking_lost/unsupported_view, not poor technique.", "Interpolated landmarks may preserve segmentation continuity but cannot pass scoring criteria or endpoint holds.", "Thresholds are versioned per primitive, phase, view, and landmark set."]
+      }
+    },
+    "measurementPolicy": {
+      "imageSpace": "Use normalized image coordinates for framing and visible displacement, normalized to stable body references from the same frame/view.",
+      "worldSpace": "Treat MediaPipe world coordinates as monocular estimates, not ground-truth metric capture. Do not report absolute speed, impact, contact, or hidden rotation from them.",
+      "sourceSelection": "Each criterion declares one primary coordinate source and supported view. Conflicting sources produce uncertain/unobservable; OR-pass between sources is prohibited.",
+      "upperBodyLimit": "BlazePose wrists do not expose fist shape or reliable fist rotation; punch/block definitions must not score those properties."
+    },
+    "temporalPolicy": {
+      "clock": "Monotonic capture timestamps only; all durations are milliseconds, never frames.",
+      "segmentation": "Use streaming phase evidence with onset/exit hysteresis; batch peak-frame heuristics are not primitive boundaries.",
+      "trackingGaps": "Suspend scoring on short gaps and require reacquisition; long gaps close the attempt as tracking_lost/uncertain without a numeric score; endpoint hold time advances only while observable.",
+      "fpsGate": "The same evidence resampled at supported FPS must preserve primitive count, phase order, and completion status within declared tolerance."
+    },
+    "sideAndOrientationPolicy": {
+      "canonicalSide": "Persist anatomical LEFT/RIGHT only; preview mirroring and camera-relative direction are separate metadata.",
+      "cameraMetadata": ["cameraFacing", "previewMirrored", "sensorRotationDeg", "displayRotationDeg"],
+      "orientationSectors": ["FRONT", "LEFT_OBLIQUE", "LEFT_PROFILE", "BACK", "RIGHT_PROFILE", "RIGHT_OBLIQUE", "UNKNOWN"],
+      "turnPolicy": "Suspend limb scoring during blind turns. Confirm turns from observable pre/post orientation checkpoints, then require stable identity, scale, framing, stance, and endpoint before advancing."
+    },
+    "voicePolicy": {
+      "channels": {"instruction": "ordered_non_droppable", "correction": "replace_same_step_only", "result": "latest_only", "status": "latest_only"},
+      "observationGate": "Closed from cue enqueue through TTS completion/cancellation plus reactionGuardMs; frames captured while closed cannot complete the step.",
+      "lifecycle": "Pause observation and timers on audio-focus loss, app background, screen lock, or navigation blur; resume through explicit reacquisition.",
+      "fallback": "If TTS is unavailable, show deterministic text and require acknowledgement before observation."
+    },
+    "persistenceArchitecture": {
+      "tables": {"training_sessions": "parent activity", "attempts": "ordered primitive attempts", "sequence_steps": "expected/observed mapping, retries/corrections/skips", "pose_evidence": "optional compact landmarks governed by replay consent"},
+      "versionBundle": ["resultSchemaVersion", "primitiveDefinitionVersion", "detectorVersion", "scorerVersion", "sequenceDefinitionVersion", "cueSetVersion", "poseModelVersion", "appVersion"],
+      "offlineContract": ["client-generated UUIDs", "one local parent/child/evidence event graph", "idempotent upserts", "parent accepted before child evidence", "remove local event only after server acknowledgement", "guest upgrade keeps userId"],
+      "legacyContract": "Keep kicks and kick_frames unchanged; generalized results use additive tables and adapters."
+    },
+    "scoringPolicy": {
+      "components": ["recognitionOutcome", "executionScore", "transitionScore", "completionOutcome"],
+      "coverageRule": "Numeric scores require minimum observable coverage; missing evidence never deducts.",
+      "hardGateRule": "A failed hard gate prevents a passing outcome and remains visible separately from the numeric score.",
+      "aggregationRule": "Generalized metrics are namespaced and do not enter kick-only Fighter Attributes/goals/streaks without an explicit profile."
+    },
+    "beginnerUxPolicy": {
+      "beforeScoring": ["required body region in frame", "supported camera view", "starting stance and side", "stable-pose calibration", "countdown/ready action"],
+      "learnMode": "Allow relaxed timing and disabled speed scoring while preserving order, endpoint, and safety hard gates.",
+      "correctionRule": "Give one highest-priority observable correction; never correct an unobservable criterion.",
+      "retryEscape": "After two failed retries offer demonstration, adjust camera, retry, skip, or end."
+    },
+    "phases": [
+      {
+        "id": "phase-a-voice-foundation",
+        "title": "Voice coach foundation",
+        "scope": [
+          "Offline TTS with Off / Score / Score+cue / Full modes.",
+          "Interrupt-and-speak-latest queue policy for rapid training.",
+          "Shared audio settings, pause/resume, repeat cue, and mute controls.",
+          "Short, deterministic cue vocabulary suitable for noisy gyms."
+        ],
+        "whyFirst": "Forms require reliable speech orchestration; this also delivers the already-planned Update 3 value immediately.",
+        "validation": ["rapid-kick queue test", "offline test", "screen-lock/audio-interruption test", "Android TTS unavailable fallback"]
+      },
+      {
+        "id": "phase-b-single-upper-body-techniques",
+        "title": "Single punches and blocks",
+        "scope": [
+          "Start with a small beginner set: jab/lead straight, cross/rear straight, high block, inward/middle block, low block.",
+          "Define stance, chamber/start, extension, alignment, endpoint, recoil/reset, torso stability, and opposite-hand discipline where visible.",
+          "Support explicit left/right and orthodox/southpaw stance selection before attempting automatic stance inference.",
+          "Add a debug/calibration view showing every criterion before hiding it in production."
+        ],
+        "limitations": [
+          "Hands frequently occlude the face/torso and move faster than legs.",
+          "One camera cannot measure impact or reliably infer fist rotation in depth.",
+          "Punch/block evaluation must tolerate lower wrist visibility without inventing landmarks."
+        ],
+        "validation": ["labeled clean/bad recordings", "left/right tests", "slow/fast tests", "camera distance/view tests", "non-technique false-positive set"]
+      },
+      {
+        "id": "phase-c-combo-engine",
+        "title": "Kick, punch, block, and mixed combinations",
+        "scope": [
+          "Add technique order, timing windows, inter-move transitions, stance continuity, rhythm, recovery, and completion gates.",
+          "Begin with fixed 2-move combinations, then 3-4 move combinations.",
+          "Initial examples: jab-cross, block-cross, front-snap-cross, roundhouse-cross, jab-cross-roundhouse.",
+          "Score each move separately plus transition quality; never average away a dangerous/critical failure.",
+          "Allow practice modes: announced sequence, chosen sequence, and later free-combo recognition."
+        ],
+        "stateMachine": ["READY", "WAITING_FOR_ONSET", "CANDIDATE_MOVE", "MOVE_COMMITTED", "WAITING_FOR_ENDPOINT", "TRANSITION", "TRACKING_SUSPENDED", "REACQUIRING", "COMBO_COMPLETE", "RETRY_OR_ABORT"],
+        "validation": ["correct order", "wrong order", "missing move", "extra move", "too-fast/too-slow", "pause mid-combo", "tracking loss", "duplicate-trigger prevention"]
+      },
+      {
+        "id": "phase-d-guided-basic-form",
+        "title": "Voice-guided basic form/pattern MVP",
+        "scope": [
+          "Start with one short, mostly camera-visible beginner pattern such as Kibon/Kibon Poomsae (exact school naming and sequence must be confirmed with the user/instructor).",
+          "Preload the ordered steps as movement primitives with expected direction, stance, side, and completion pose.",
+          "Speak the next move, observe, require a short stable completion hold, then say either the next move or one corrective cue.",
+          "Controls: start, pause, repeat instruction, retry, skip step, restart, mute, and end session.",
+          "Display current step / total steps and the expected movement name without requiring the user to read during execution.",
+          "Store per-step result, retries, confidence, corrections, elapsed time, and form completion summary."
+        ],
+        "coachStateMachine": ["INTRO", "POSITIONING", "CUE_QUEUED", "CUE_SPEAKING", "REACTION_GUARD", "OBSERVING", "HOLD_TO_CONFIRM", "TRACKING_SUSPENDED", "REACQUIRING", "CORRECTING", "RETRYING", "ADVANCING", "PAUSED", "COMPLETE", "ABORTED"],
+        "advancePolicy": "Advance only after cue completion, reaction guard, expected primitive commit, sufficient evidence coverage, timestamp-based stable endpoint hold, and any orientation checkpoint. Never auto-advance on uncertainty, tracking loss, unsupported view, blind turn, or stale async work.",
+        "criticalRisk": "Turns can hide limbs or move the body out of frame. The MVP form must use a documented camera placement and may require orientation checkpoints rather than pretending continuous full-body tracking is always available.",
+        "validation": ["correct full form", "one deliberate error per step", "wrong side/direction", "missed step", "turn/occlusion", "speech interruption", "pause/resume", "tracking-loss recovery"]
+      },
+      {
+        "id": "phase-e-full-forms-platform",
+        "title": "Multiple forms and adaptive coaching",
+        "scope": [
+          "Add school/style-specific libraries only after each sequence is instructor-verified.",
+          "Offer Learn (step-by-step), Practice (minimal cues), and Test (no cues until completion) modes.",
+          "Personalize tolerances from user history without lowering safety-critical requirements.",
+          "Add form-level metrics: order accuracy, stance consistency, timing/rhythm, balance, direction changes, and recovery.",
+          "Version every form definition so historical sessions remain interpretable when criteria change."
+        ]
+      }
+    ],
+    "recommendedMvpOrder": [
+      "Voice feedback foundation",
+      "One punch and one block with debug criteria",
+      "A two-move punch combo",
+      "A kick+punch combo",
+      "One instructor-verified guided basic form",
+      "Expand technique and form libraries"
+    ],
+    "dataModelNotes": [
+      "Do not rename, overload, or insert non-kick activities into kicks; expose legacy kicks through a generalized read adapter.",
+      "Use client-generated UUIDs and idempotent local event graphs for parent session, ordered step, attempt, and optional evidence.",
+      "Store schema/definition/detector/scorer/sequence/cue/model/app versions on every attempt.",
+      "Store criterion status as pass/fail/unobservable/not_applicable; score is null below minimum observable coverage.",
+      "Store uncertain/incomplete/tracking_lost/unsupported_view/skipped separately from technique failures.",
+      "Store anatomical side separately from camera facing, preview mirroring, rotations, and camera-relative orientation.",
+      "Store compact landmarks only with replay consent and deletion/retention controls; no video unless policy and consent change.",
+      "Form sessions contain expected steps, observed attempts, transition results, retries, corrections, skips, and one parent summary.",
+      "Historical sessions render against immutable recorded definition versions or criterion snapshots.",
+      "Generalized metrics do not enter kick-only goals/streaks/Fighter Attributes without an explicit aggregation profile."
+    ],
+    "researchAndSafetyGates": [
+      "Instructor verifies every movement sequence and coaching cue before release.",
+      "Create labeled validation clips across body sizes, clothing, camera distance, lighting, stance side, and device FPS.",
+      "Calibrate thresholds from data; document heuristic weights until then.",
+      "Clearly label unsupported camera views and movements that cannot be measured reliably.",
+      "Never auto-advance on low-confidence tracking; offer retry or skip.",
+      "Ship no criterion relying on monocular depth, absolute world speed, hidden rotation, fist rotation, impact, or contact without labeled view-specific validation.",
+      "Require FPS-resampling, mirroring/side, occlusion-gap, turn/reacquisition, stale-async, offline-idempotency, and TTS-observation-race test suites before combos/forms.",
+      "Track primitive recall, non-technique false positives, side/orientation confusion, score coverage, tracking-loss rate, and cue correctness separately; one aggregate accuracy number is insufficient."
+    ]
+  },
   "knownIssues": [
     "App.test.tsx fails: jest can't transpile @sentry/react-native ESM (pre-existing, 26 logic tests pass)",
     "Play warnings persist post-compat: edge-to-edge + deprecated APIs from libs (react-native-screens, RN core, material) + 16KB - cleared by rn-upgrade",
-    "next Play upload must be versionCode >= 7"
+    "next Play upload must be versionCode >= 8"
   ]
 }
