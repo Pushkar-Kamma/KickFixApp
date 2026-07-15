@@ -24,6 +24,8 @@ export interface TelemetryCounters {
   savedKicks: number;
   /** saveKick HTTP failures (queued for retry). */
   saveFailures: number;
+  /** Kicks rejected by the technique identity gate as not matching the mode. */
+  modeConfusions: number;
   /** Last update timestamp (ms). */
   lastUpdated: number;
 }
@@ -34,6 +36,7 @@ const DEFAULT: TelemetryCounters = {
   tooShortKicks: 0,
   savedKicks: 0,
   saveFailures: 0,
+  modeConfusions: 0,
   lastUpdated: 0,
 };
 

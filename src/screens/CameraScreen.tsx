@@ -32,11 +32,23 @@ import { J, frameUsable, detectKickingLeg, type Landmark, type PoseFrame, type M
 import { analyzeFrontSnap } from '../engine/FrontSnapAnalyzer';
 import { analyzeSideKick } from '../engine/SideKickAnalyzer';
 import { analyzeRoundhouse } from '../engine/RoundhouseAnalyzer';
+import { runTechniqueGate } from '../engine/techniqueGate';
+import { resamplePoseFrames } from '../engine/filters';
 import type { KickResult, CriterionResult } from '../engine/FrontSnapAnalyzer';
 
 const { width, height } = Dimensions.get('window');
 
 type Props = NativeStackScreenProps<TrainStackParamList, 'Camera'>;
+
+/**
+ * Phase 0 technique identity gate. OFF by default — enable only AFTER the
+ * discriminative thresholds in techniqueGate.PRIORS are calibrated on labeled
+ * clips, otherwise it may reject legitimate kicks. When on, a captured motion
+ * that does not match the selected mode is rejected or redirected instead of
+ * being scored by the wrong analyzer (the side-kick-scores-as-front-snap bug).
+ * Recognition is separate from quality: the gate never changes a score.
+ */
+const TECHNIQUE_GATE_ENABLED = false;
 
 type Phase = 'IDLE' | 'RECORDING' | 'COOLDOWN';
 
@@ -177,6 +189,26 @@ export default function CameraScreen({ route, navigation }: Props) {
     const leg = detectKickingLeg(frames.map(f => f.image)) ?? 'Right';
 
     InteractionManager.runAfterInteractions(() => {
+      // Recognition gate (Phase 0): verify the motion matches the selected mode
+      // BEFORE scoring. Recognition is separate from quality — the gate never
+      // mutates a score. Behind a flag until PRIORS are calibrated.
+      if (TECHNIQUE_GATE_ENABLED) {
+        const requestedTech: 'front' | 'side' | 'round' =
+          kickMode === 'Side Kick' ? 'side' : kickMode === 'Roundhouse' ? 'round' : 'front';
+        try {
+          const gate = runTechniqueGate(resamplePoseFrames(frames), requestedTech, leg);
+          if (gate.outcome !== 'accept') {
+            buzz(HAPTIC_REJECT);
+            bumpTelemetry(userId.current, 'modeConfusions').catch(() => {});
+            flashNotice(gate.reason);
+            return;
+          }
+        } catch (e) {
+          // Fail open: a gate error must never block a legitimate kick.
+          console.warn('[CameraScreen] technique gate failed:', e);
+        }
+      }
+
       let result: KickResult;
       try {
         result = kickMode === 'Side Kick'
