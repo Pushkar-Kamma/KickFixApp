@@ -122,3 +122,25 @@ describe('goalRing + weakness targeting', () => {
     ]);
   });
 });
+
+describe('checkStreakBreak across multiple days (freeze accounting)', () => {
+  const pick = (u: { current: number; longest: number; lastMetDate: string; freezes: number }): StreakState =>
+    ({ current: u.current, longest: u.longest, lastMetDate: u.lastMetDate, freezes: u.freezes });
+
+  it('spends exactly one freeze per missed day and breaks only when exhausted', () => {
+    let s: StreakState = { current: 5, longest: 5, lastMetDate: '2026-07-14', freezes: 3 };
+    s = pick(checkStreakBreak(s, '2026-07-16')); expect(s.freezes).toBe(2); expect(s.current).toBe(5);
+    s = pick(checkStreakBreak(s, '2026-07-17')); expect(s.freezes).toBe(1); expect(s.current).toBe(5);
+    s = pick(checkStreakBreak(s, '2026-07-18')); expect(s.freezes).toBe(0); expect(s.current).toBe(5);
+    const broken = checkStreakBreak(s, '2026-07-19');
+    expect(broken.event).toBe('broken');
+    expect(broken.current).toBe(0);
+  });
+
+  it('does not re-consume freezes on repeated same-day calls', () => {
+    const s: StreakState = { current: 5, longest: 5, lastMetDate: '2026-07-14', freezes: 3 };
+    const a = checkStreakBreak(s, '2026-07-16');
+    const b = checkStreakBreak(pick(a), '2026-07-16');
+    expect(b.freezes).toBe(a.freezes);
+  });
+});

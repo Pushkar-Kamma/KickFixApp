@@ -192,12 +192,20 @@ export default function CameraScreen({ route, navigation }: Props) {
       // Recognition gate (Phase 0): verify the motion matches the selected mode
       // BEFORE scoring. Recognition is separate from quality — the gate never
       // mutates a score. Behind a flag until PRIORS are calibrated.
+      let effectiveMode: KickMode = kickMode;
       if (TECHNIQUE_GATE_ENABLED) {
         const requestedTech: 'front' | 'side' | 'round' =
           kickMode === 'Side Kick' ? 'side' : kickMode === 'Roundhouse' ? 'round' : 'front';
         try {
           const gate = runTechniqueGate(resamplePoseFrames(frames), requestedTech, leg);
-          if (gate.outcome !== 'accept') {
+          const MODE_LABEL: Record<string, KickMode> = { front: 'Front Snap', side: 'Side Kick', round: 'Roundhouse' };
+          if (gate.outcome === 'redirect' && gate.detected && MODE_LABEL[gate.detected]) {
+            // Recognized a DIFFERENT technique — score it as what it actually was.
+            effectiveMode = MODE_LABEL[gate.detected];
+            bumpTelemetry(userId.current, 'modeConfusions').catch(() => {});
+            flashNotice(`Looked like a ${effectiveMode} — scoring it as ${effectiveMode}.`);
+          } else if (gate.outcome !== 'accept') {
+            // Not recognized as any clean kick — reject with a retry hint (no score).
             buzz(HAPTIC_REJECT);
             bumpTelemetry(userId.current, 'modeConfusions').catch(() => {});
             flashNotice(gate.reason);
@@ -211,9 +219,9 @@ export default function CameraScreen({ route, navigation }: Props) {
 
       let result: KickResult;
       try {
-        result = kickMode === 'Side Kick'
+        result = effectiveMode === 'Side Kick'
           ? analyzeSideKick(frames, leg)
-          : kickMode === 'Roundhouse'
+          : effectiveMode === 'Roundhouse'
             ? analyzeRoundhouse(frames, leg)
             : analyzeFrontSnap(frames, leg);
       } catch (e) {
@@ -260,7 +268,7 @@ export default function CameraScreen({ route, navigation }: Props) {
         errors: result.criteria.filter(c => !c.pass).map(c => c.id),
         leg,
         peakAngle: result.metrics.peakKneeAngleDeg,
-        kickMode,
+        kickMode: effectiveMode,
         // Rich data for fighter-attribute scoring (additive, optional)
         passedCriteria: result.criteria.filter(c => c.pass && c.severity !== 'info').map(c => c.id),
         metrics: {
@@ -284,7 +292,7 @@ export default function CameraScreen({ route, navigation }: Props) {
           peakIdx: result.peakFrameIdx,
           chamberIdx: result.chamberFrameIdx,
           leg,
-          kickMode,
+          kickMode: effectiveMode,
         });
         isPausedRef.current = true;
         navigation.navigate('KickReview', { kickId: tempKey });
@@ -293,14 +301,14 @@ export default function CameraScreen({ route, navigation }: Props) {
       if (userId.current && sessionId.current) {
         const uid = userId.current;
         const sid = sessionId.current;
-        saveKick(uid, sid, kickMode, engineData)
+        saveKick(uid, sid, effectiveMode, engineData)
           .then(({ data, error }) => {
             if (error || !data) {
               // Surface failure + queue for offline retry.
               bumpTelemetry(uid, 'saveFailures').catch(() => {});
               queueKickSave({
                 tempId: tempKey, userId: uid, sessionId: sid,
-                kickType: kickMode, engineData,
+                kickType: effectiveMode, engineData,
               }).catch(() => {});
               flashNotice('Saved locally — will sync when online.');
               return;
@@ -327,7 +335,7 @@ export default function CameraScreen({ route, navigation }: Props) {
             bumpTelemetry(uid, 'saveFailures').catch(() => {});
             queueKickSave({
               tempId: tempKey, userId: uid, sessionId: sid,
-              kickType: kickMode, engineData,
+              kickType: effectiveMode, engineData,
             }).catch(() => {});
             flashNotice('Saved locally — will sync when online.');
           });

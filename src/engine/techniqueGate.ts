@@ -125,7 +125,11 @@ export function extractTechniqueFeatures(frames: PoseFrame[], leg: 'Left' | 'Rig
     const baseHipVis = vis(pim, J.L_HIP) >= VIS_MIN && vis(pim, J.R_HIP) >= VIS_MIN;
     const baselineEnd = Math.max(1, Math.floor(N * 0.25));
     let baseline = 0;
-    for (let i = 0; i < baselineEnd; i++) baseline = Math.max(baseline, hipWidth[i]);
+    for (let i = 0; i < baselineEnd; i++) {
+      if (vis(frames[i].image, J.L_HIP) >= VIS_MIN && vis(frames[i].image, J.R_HIP) >= VIS_MIN) {
+        baseline = Math.max(baseline, hipWidth[i]);
+      }
+    }
     const lo = Math.max(0, peakIdx - 3), hi = Math.min(N - 1, peakIdx + 3);
     let minPeak = Infinity;
     for (let i = lo; i <= hi; i++) minPeak = Math.min(minPeak, hipWidth[i]);
@@ -166,16 +170,19 @@ export function extractTechniqueFeatures(frames: PoseFrame[], leg: 'Left' | 'Rig
 
   // ── Feature 4: chamber abduction (thigh out-to-side at chamber, image) ──
   // chamber = min knee angle (world) before peak; abduction = thigh vector angle from vertical.
+  // Only observable when a REAL flexion exists (a standing frame-0 minimum is NOT a chamber).
   let chamberObs = false, chamberAbductionDeg = 0;
   {
-    let chamberIdx = 0, chamberMin = Infinity;
+    let chamberIdx = -1, chamberMin = Infinity, chamberMax = -Infinity;
     for (let i = 0; i < peakIdx; i++) {
       const w = frames[i].world;
       if (!w[ji.kHip] || !w[ji.kKnee] || !w[ji.kAnkle]) continue;
       const ka = angle3D(w[ji.kHip], w[ji.kKnee], w[ji.kAnkle]);
+      chamberMax = Math.max(chamberMax, ka);
       if (ka < chamberMin) { chamberMin = ka; chamberIdx = i; }
     }
-    const cim = frames[chamberIdx]?.image;
+    const realChamber = chamberIdx > 0 && isFinite(chamberMax) && (chamberMax - chamberMin) >= 15;
+    const cim = realChamber ? frames[chamberIdx]?.image : undefined;
     if (cim && vis(cim, ji.kHip) >= VIS_MIN && vis(cim, ji.kKnee) >= VIS_MIN) {
       const dx = cim[ji.kKnee].x - cim[ji.kHip].x;
       const dy = cim[ji.kKnee].y - cim[ji.kHip].y;

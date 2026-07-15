@@ -59,3 +59,17 @@ describe('resamplePoseFrames', () => {
     expect(at50!.image[0].x).toBeCloseTo(0.5, 4);
   });
 });
+
+describe('smoothScalar edge cases', () => {
+  it('never produces NaN when timestamps do not advance (dt<=0)', () => {
+    const out = smoothScalar([1, 2, 3], [0, 0, 0]);
+    out.forEach(v => expect(Number.isNaN(v)).toBe(false));
+  });
+  it('follows a step change toward the new level without overshooting', () => {
+    const times = Array.from({ length: 30 }, (_, i) => i * 16);
+    const step = times.map((_, i) => (i < 15 ? 0 : 10));
+    const sm = smoothScalar(step, times);
+    expect(sm[sm.length - 1]).toBeGreaterThan(sm[15]);
+    expect(sm[sm.length - 1]).toBeLessThanOrEqual(10);
+  });
+});

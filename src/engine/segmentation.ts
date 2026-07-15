@@ -148,15 +148,13 @@ export function segmentKick(frames: PoseFrame[], leg: 'Left' | 'Right'): Segment
     }
   }
 
-  // Assemble phases. Chamber/extension boundaries depend on chamber observability.
+  // Assemble phases so they TILE without overlap (extension starts at chamber end).
   const phases: PhaseSpan[] = [];
   const chamberStart = chamberIdx ?? onsetIdx;
+  const chamberEnd = chamberIdx != null ? Math.min(chamberIdx + 1, extensionIdx) : onsetIdx;
   phases.push(span('onset', onsetIdx, chamberStart, times));
-  phases.push(span('chamber',
-    chamberIdx ?? onsetIdx,
-    chamberIdx != null ? Math.min(chamberIdx + 1, extensionIdx) : onsetIdx,
-    times, chamberIdx != null));
-  phases.push(span('extension', chamberStart, extensionIdx, times));
+  phases.push(span('chamber', chamberStart, chamberEnd, times, chamberIdx != null));
+  phases.push(span('extension', chamberEnd, extensionIdx, times));
   phases.push(span('retraction', extensionIdx, retractEndIdx, times));
   phases.push(span('recovery', retractEndIdx, N - 1, times));
 

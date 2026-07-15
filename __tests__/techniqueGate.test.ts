@@ -151,4 +151,30 @@ describe('runTechniqueGate — bug-fix behavior', () => {
     const res = runTechniqueGate(sideLike(), 'side', 'Right');
     expect(res.outcome).not.toBe('redirect');
   });
+  it('ranks a side-like kick as Side (top of distribution) and never accepts it as Front', () => {
+    // With UNCALIBRATED priors the gate may return `uncertain` rather than a
+    // confident `redirect`, but it must (a) rank Side highest and (b) never
+    // accept the motion as a Front Snap. Confident redirect awaits calibration.
+    const res = runTechniqueGate(sideLike(), 'front', 'Right');
+    const top = [...res.distribution].sort((a, b) => b.probability - a.probability)[0];
+    expect(top.technique).toBe('side');
+    expect(res.outcome).not.toBe('accept');
+    expect(res.detected).not.toBe('front');
+  });
+  it('ACCEPTS a square-hipped vertical kick selected as Front Snap', () => {
+    const frontLike = buildFrames(20, 12, (i) => {
+      const toPeak = Math.min(1, i / 12);
+      const ankleY = 0.70 - 0.28 * (i <= 12 ? i / 12 : (24 - i) / 12);
+      return {
+        [J.L_HIP]: P(0.35, 0.5),
+        [J.R_HIP]: P(0.65, 0.5),                 // constant width → no hip rotation
+        [J.R_KNEE]: P(0.5, 0.5),
+        [J.R_ANKLE]: P(0.5, ankleY),             // vertical travel
+        [J.R_FOOT_INDEX]: P(0.5, 0.62 - 0.20 * toPeak),
+      };
+    });
+    const res = runTechniqueGate(frontLike, 'front', 'Right');
+    expect(res.detected).toBe('front');
+    expect(res.outcome).toBe('accept');
+  });
 });

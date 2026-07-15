@@ -92,6 +92,14 @@ function isoToUTC(iso: string): number {
 export function daysBetweenISO(a: string, b: string): number {
   return Math.round((isoToUTC(b) - isoToUTC(a)) / 86_400_000);
 }
+/** Return the ISO date `days` away from `iso` (negative = earlier). */
+function isoAddDays(iso: string, days: number): string {
+  const d = new Date(isoToUTC(iso) + days * 86_400_000);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
 
 /**
  * Register that the daily goal was met on `todayISO`. Handles first-ever day,
@@ -138,7 +146,9 @@ export function checkStreakBreak(prev: StreakState, todayISO: string): StreakUpd
   if (diff <= 1) return { ...prev, event: 'maintained', freezesConsumed: 0 };
   const missed = diff - 1; // full days strictly between lastMetDate and today
   if (prev.freezes >= missed) {
-    return { ...prev, freezes: prev.freezes - missed, event: 'maintained', freezesConsumed: missed };
+    // Advance lastMetDate to yesterday so a later same-/next-day call cannot
+    // re-consume freezes for days already covered (one freeze per missed day).
+    return { ...prev, freezes: prev.freezes - missed, lastMetDate: isoAddDays(todayISO, -1), event: 'maintained', freezesConsumed: missed };
   }
   return { ...prev, current: 0, event: 'broken', freezesConsumed: prev.freezes };
 }

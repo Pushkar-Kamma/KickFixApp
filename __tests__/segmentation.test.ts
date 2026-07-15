@@ -87,6 +87,13 @@ describe('segmentKick', () => {
     expect(seg.extensionIdx).toBeGreaterThan(0);
   });
 
+  it('produces phases that tile without gaps or overlaps', () => {
+    const seg = segmentKick(buildKick({ phi: phiChamber }), 'Right');
+    for (let i = 1; i < seg.phases.length; i++) {
+      expect(seg.phases[i].startIdx).toBe(seg.phases[i - 1].endIdx);
+    }
+  });
+
   it('handles too-few-frames without throwing', () => {
     const seg = segmentKick(buildKick({ phi: phiChamber, N: 2 }), 'Right');
     expect(seg.phases.length).toBeGreaterThanOrEqual(1);

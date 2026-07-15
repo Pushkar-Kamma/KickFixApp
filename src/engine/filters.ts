@@ -48,17 +48,19 @@ export function smoothScalar(
   if (n === 0) return [];
   const out = new Array<number>(n);
   out[0] = values[0];
+  let xPrev = values[0];      // raw previous sample (for the derivative, per Casiez)
   let xHatPrev = values[0];
   let dxHatPrev = 0;
   for (let i = 1; i < n; i++) {
     const dt = Math.max(1e-3, (times[i] - times[i - 1]) / 1000);
-    const dx = (values[i] - xHatPrev) / dt;
+    const dx = (values[i] - xPrev) / dt;
     const aD = alpha(p.dCutoff, dt);
     const dxHat = aD * dx + (1 - aD) * dxHatPrev;
     const cutoff = p.minCutoff + p.beta * Math.abs(dxHat);
     const a = alpha(cutoff, dt);
     const xHat = a * values[i] + (1 - a) * xHatPrev;
     out[i] = xHat;
+    xPrev = values[i];
     xHatPrev = xHat;
     dxHatPrev = dxHat;
   }
@@ -105,9 +107,11 @@ export function resamplePoseFrames(frames: PoseFrame[], hz = 60): PoseFrame[] {
   if (span <= 0) return frames.slice();
 
   const dt = 1000 / hz;
+  const steps = Math.floor(span / dt);
   const out: PoseFrame[] = [];
   let j = 0;
-  for (let t = t0; t <= tEnd + 1e-6; t += dt) {
+  for (let k = 0; k <= steps; k++) {
+    const t = t0 + k * dt; // integer step count avoids floating-point drift
     // Advance j so that frames[j].t <= t <= frames[j+1].t.
     while (j < n - 2 && frames[j + 1].t < t) j++;
     const a = frames[j];
@@ -117,7 +121,7 @@ export function resamplePoseFrames(frames: PoseFrame[], hz = 60): PoseFrame[] {
     out.push({
       image: lerpLandmarks(a.image, b.image, u),
       world: lerpLandmarks(a.world, b.world, u),
-      t: t - t0,
+      t: k * dt,
     });
   }
   return out;
